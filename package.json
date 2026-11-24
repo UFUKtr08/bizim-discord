@@ -1,0 +1,25 @@
+{
+  "name": "bizim-discord",
+  "version": "1.0.0",
+  "main": "electron-main.js",
+  "scripts": {
+    "server": "node server.js",
+    "app": "electron .",
+    "build-exe": "electron-builder --win portable"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "socket.io": "^4.8.0"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.bizim.discord",
+    "productName": "BizimDiscord",
+    "win": {
+      "target": "portable"
+    }
+  }
+}

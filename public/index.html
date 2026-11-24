@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BizimDiscord</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: system-ui, sans-serif;
+        }
+
+        body {
+            background: #313338;
+            color: #dbdee1;
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+        }
+
+        button {
+            background: #5865f2;
+            color: #fff;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        button.danger {
+            background: #da373c;
+        }
+
+        button.success {
+            background: #23a559;
+        }
+
+        button.secondary {
+            background: #4e5058;
+        }
+
+        button.mini {
+            padding: 3px 6px;
+            font-size: 11px;
+        }
+
+        input,
+        select {
+            background: #1e1f22;
+            border: 1px solid #3f4147;
+            color: #fff;
+            padding: 8px;
+            border-radius: 5px;
+            outline: none;
+        }
+
+        /* Giriş Modalı */
+        #auth-overlay {
+            position: fixed;
+            inset: 0;
+            background: #1e1f22;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+        }
+
+        .auth-box {
+            background: #2b2d31;
+            padding: 26px;
+            border-radius: 10px;
+            width: 330px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .auth-box h2 {
+            text-align: center;
+            color: #fff;
+        }
+
+        .auth-hint {
+            font-size: 12px;
+            color: #949ba4;
+            text-align: center;
+        }
+
+        /* Sol Panel (Kanallar + Ses Kontrolü) */
+        #sidebar {
+            width: 250px;
+            background: #2b2d31;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #1e1f22;
+        }
+
+        .section-hdr {
+            padding: 12px 14px 6px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #949ba4;
+            text-transform: uppercase;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .channel-list {
+            list-style: none;
+            padding: 0 8px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .channel-item {
+            padding: 8px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2px;
+            font-size: 14px;
+        }
+
+        .channel-item:hover {
+            background: #35373c;
+        }
+
+        .channel-item.active {
+            background: #404249;
+            color: #fff;
+            font-weight: 600;
+        }
+
+        /* Yayın Süresi Göstergesi */
+        #timer-bar {
+            background: #f0b232;
+            color: #1e1f22;
+            text-align: center;
+            font-weight: 700;
+            font-size: 12px;
+            padding: 6px;
+            display: none;
+        }
+
+        /* Alt Ses ve Ayar Paneli */
+        #voice-panel {
+            padding: 10px;
+            background: #232428;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            border-top: 1px solid #1e1f22;
+        }
+
+        .row {
+            display: flex;
+            gap: 6px;
+        }
+
+        .row button {
+            flex: 1;
+        }
+
+        .audio-settings {
+            font-size: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding-top: 6px;
+            border-top: 1px solid #35373c;
+        }
+
+        /* Orta Alan (Ekran Paylaşımı + Sohbet) */
+        #main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        #topbar {
+            padding: 12px 16px;
+            background: #313338;
+            border-bottom: 1px solid #1e1f22;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        #screen-stage {
+            background: #000;
+            display: none;
+            padding: 8px;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
+            max-height: 45vh;
+            overflow-y: auto;
+            border-bottom: 2px solid #1e1f22;
+        }
+
+        #screen-stage video {
+            max-height: 40vh;
+            max-width: 100%;
+            border-radius: 6px;
+            border: 2px solid #5865f2;
+        }
+
+        #messages {
+            flex: 1;
+            padding: 14px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .msg {
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .msg .time {
+            color: #949ba4;
+            font-size: 11px;
+            margin-right: 6px;
+        }
+
+        .msg .sender {
+            font-weight: 700;
+            color: #fff;
+            margin-right: 6px;
+        }
+
+        .msg .admin-tag {
+            background: #da373c;
+            color: #fff;
+            font-size: 10px;
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin-right: 5px;
+        }
+
+        #chat-form {
+            padding: 12px;
+            background: #2b2d31;
+            display: flex;
+            gap: 8px;
+        }
+
+        #chat-input {
+            flex: 1;
+        }
+
+        /* Sağ Panel (Kullanıcılar + Kişi Ses Ayarı + Admin) */
+        #rightbar {
+            width: 250px;
+            background: #2b2d31;
+            border-left: 1px solid #1e1f22;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #user-list {
+            list-style: none;
+            padding: 8px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .user-card {
+            background: #313338;
+            padding: 8px;
+            border-radius: 6px;
+            margin-bottom: 6px;
+            font-size: 13px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .user-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .vol-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #949ba4;
+        }
+
+        .vol-row input[type="range"] {
+            flex: 1;
+            padding: 0;
+        }
+
+        #admin-panel {
+            padding: 10px;
+            background: #232428;
+            border-top: 1px solid #1e1f22;
+            display: none;
+            flex-direction: column;
+            gap: 6px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- GİRİŞ / KAYIT -->
+    <div id="auth-overlay">
+        <div class="auth-box">
+            <h2>BizimDiscord</h2>
+            <p class="auth-hint">İlk kayıt olan hesap otomatik Admin olur.</p>
+            <input id="auth-user" placeholder="Kullanıcı adı" />
+            <input id="auth-pass" type="password" placeholder="Şifre (en az 4 karakter)" />
+            <div class="row">
+                <button id="btn-login" class="success">Giriş Yap</button>
+                <button id="btn-register">Kayıt Ol</button>
+            </div>
+            <small id="auth-err" style="color:#f23f42; text-align:center;"></small>
+        </div>
+    </div>
+
+    <!-- SOL PANEL -->
+    <aside id="sidebar">
+        <div id="timer-bar">Kalan Yayın Süresi: --:--</div>
+        <div class="section-hdr">Metin Kanalları</div>
+        <ul id="text-channels" class="channel-list" style="flex:0 1 auto;"></ul>
+        <div class="section-hdr">Ses Kanalları</div>
+        <ul id="voice-channels" class="channel-list"></ul>
+
+        <div id="voice-panel">
+            <div id="voice-status" style="font-size:12px; color:#949ba4;">Ses kanalında değilsin</div>
+            <div class="row">
+                <button id="btn-mute" class="secondary" style="display:none;">Mikrofon: Açık</button>
+                <button id="btn-screen" style="display:none;">Ekran Paylaş</button>
+            </div>
+            <button id="btn-leave-voice" class="danger" style="display:none;">Sesten Çık</button>
+
+            <div class="audio-settings">
+                <label>Mikrofon Kazancı: <span id="mic-gain-val">100%</span></label>
+                <input id="mic-gain" type="range" min="0" max="2" step="0.05" value="1" />
+                <select id="mic-select">
+                    <option value="">Varsayılan Mikrofon</option>
+                </select>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ORTA ALAN -->
+    <main id="main">
+        <div id="topbar">
+            <span id="active-channel-title"># genel-sohbet</span>
+            <span id="me-badge" style="font-size:12px; color:#949ba4;"></span>
+        </div>
+        <div id="screen-stage"></div>
+        <div id="messages"></div>
+        <form id="chat-form">
+            <input id="chat-input" placeholder="Mesaj yaz..." autocomplete="off" />
+            <button type="submit">Gönder</button>
+        </form>
+    </main>
+
+    <!-- SAĞ PANEL -->
+    <aside id="rightbar">
+        <div class="section-hdr">Çevrimiçi Kullanıcılar</div>
+        <ul id="user-list"></ul>
+
+        <!-- ADMİN PANELİ -->
+        <div id="admin-panel">
+            <strong style="color:#f0b232;">Admin Ayarları</strong>
+            <div class="row">
+                <input id="new-ch-name" placeholder="Kanal adı" style="flex:1; min-width:0;" />
+                <select id="new-ch-type">
+                    <option value="text">Metin</option>
+                    <option value="voice">Ses</option>
+                </select>
+            </div>
+            <button id="btn-add-ch" class="success mini">Kanal Ekle</button>
+            <div class="row" style="align-items:center; margin-top:4px;">
+                <span style="white-space:nowrap;">Yayın Limiti (dk):</span>
+                <input id="time-limit-input" type="number" min="0" value="60" style="width:65px;" />
+                <button id="btn-set-limit" class="mini">Kaydet</button>
+            </div>
+            <small style="color:#949ba4;">0 yazarsan süre sınırı kalkar.</small>
+        </div>
+    </aside>
+
+    <div id="audio-container"></div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const rtcConfig = {
+            iceServers: [
+                { urls: "stun:stun.l.google.com:19302" },
+                { urls: "stun:stun1.l.google.com:19302" }
+            ]
+        };
+
+        let me = null;
+        let channels = [];
+        let allMessages = {};
+        let activeTextChannel = "genel";
+        let currentVoiceChannel = null;
+
+        // Ses & WebRTC durumları
+        let rawMicStream = null;
+        let processedMicStream = null;
+        let audioCtx = null;
+        let micGainNode = null;
+        let screenStream = null;
+        let isMuted = false;
+        let serverMuted = false;
+        const peers = new Map();             // peerId -> RTCPeerConnection
+        const pendingCandidates = new Map(); // peerId -> candidate[]
+        const userVolumes = new Map();       // peerId -> 0..1
+
+        // DOM
+        const authOverlay = document.getElementById("auth-overlay");
+        const authUser = document.getElementById("auth-user");
+        const authPass = document.getElementById("auth-pass");
+        const authErr = document.getElementById("auth-err");
+        const textChEl = document.getElementById("text-channels");
+        const voiceChEl = document.getElementById("voice-channels");
+        const messagesEl = document.getElementById("messages");
+        const userListEl = document.getElementById("user-list");
+        const screenStage = document.getElementById("screen-stage");
+        const timerBar = document.getElementById("timer-bar");
+        const audioContainer = document.getElementById("audio-container");
+        const micGainSlider = document.getElementById("mic-gain");
+        const micSelect = document.getElementById("mic-select");
+
+        // Kayıtlı kullanıcı adını doldur
+        authUser.value = localStorage.getItem("bd_user") || "";
+
+        // --- KAYIT VE GİRİŞ ---
+        document.getElementById("btn-register").onclick = () => {
+            socket.emit("register", { username: authUser.value, password: authPass.value }, (res) => {
+                if (!res.ok) return (authErr.textContent = res.error);
+                authErr.style.color = "#23a559";
+                authErr.textContent = `Kayıt başarılı (${res.role}). Şimdi Giriş Yap'a bas.`;
+            });
+        };
+
+        document.getElementById("btn-login").onclick = () => {
+            socket.emit("login", { username: authUser.value, password: authPass.value }, (res) => {
+                if (!res.ok) {
+                    authErr.style.color = "#f23f42";
+                    return (authErr.textContent = res.error);
+                }
+                me = res.me;
+                channels = res.channels;
+                allMessages = res.messages;
+                localStorage.setItem("bd_user", me.username);
+                authOverlay.style.display = "none";
+                document.getElementById("me-badge").textContent = `${me.username} (${me.role})`;
+                document.getElementById("time-limit-input").value = res.settings.voiceTimeLimitMin;
+                if (me.role === "admin") document.getElementById("admin-panel").style.display = "flex";
+                renderChannels();
+                renderMessages();
+                loadAudioDevices();
+            });
+        };
+
+        // --- MİKROFON LİSTESİ & KAZANÇ ---
+        async function loadAudioDevices() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                micSelect.innerHTML = '<option value="">Varsayılan Mikrofon</option>';
+                devices.filter((d) => d.kind === "audioinput").forEach((d) => {
+                    const opt = document.createElement("option");
+                    opt.value = d.deviceId;
+                    opt.textContent = d.label || "Mikrofon";
+                    micSelect.appendChild(opt);
+                });
+            } catch { }
+        }
+
+        micGainSlider.oninput = () => {
+            const val = parseFloat(micGainSlider.value);
+            document.getElementById("mic-gain-val").textContent = Math.round(val * 100) + "%";
+            if (micGainNode) micGainNode.gain.value = val;
+        };
+
+        async function initMicStream() {
+            const constraints = {
+                audio: micSelect.value ? { deviceId: { exact: micSelect.value } } : true
+            };
+            rawMicStream = await navigator.mediaDevices.getUserMedia(constraints);
+            audioCtx = new AudioContext();
+            const src = audioCtx.createMediaStreamSource(rawMicStream);
+            micGainNode = audioCtx.createGain();
+            micGainNode.gain.value = parseFloat(micGainSlider.value);
+            const dest = audioCtx.createMediaStreamDestination();
+            src.connect(micGainNode);
+            micGainNode.connect(dest);
+            processedMicStream = dest.stream;
+            applyMuteState();
+        }
+
+        function applyMuteState() {
+            const mutedNow = isMuted || serverMuted;
+            if (processedMicStream) {
+                processedMicStream.getAudioTracks().forEach((t) => (t.enabled = !mutedNow));
+            }
+            const btn = document.getElementById("btn-mute");
+            if (serverMuted) {
+                btn.textContent = "Admin Susturdu";
+                btn.className = "danger";
+            } else {
+                btn.textContent = isMuted ? "Mikrofon: Kapalı" : "Mikrofon: Açık";
+                btn.className = isMuted ? "danger" : "secondary";
+            }
+        }
+
+        // --- KANALLAR VE MESAJLAR ---
+        function renderChannels() {
+            textChEl.innerHTML = "";
+            voiceChEl.innerHTML = "";
+            channels.forEach((ch) => {
+                const li = document.createElement("li");
+                li.className = "channel-item" + (ch.id === activeTextChannel || ch.id === currentVoiceChannel ? " active" : "");
+                const label = document.createElement("span");
+                label.textContent = (ch.type === "text" ? "# " : "🔊 ") + ch.name;
+                li.appendChild(label);
+
+                if (me?.role === "admin") {
+                    const del = document.createElement("button");
+                    del.textContent = "x";
+                    del.className = "danger mini";
+                    del.onclick = (e) => {
+                        e.stopPropagation();
+                        socket.emit("admin-delete-channel", ch.id);
+                    };
+                    li.appendChild(del);
+                }
+
+                if (ch.type === "text") {
+                    li.onclick = () => {
+                        activeTextChannel = ch.id;
+                        document.getElementById("active-channel-title").textContent = "# " + ch.name;
+                        renderChannels();
+                        renderMessages();
+                    };
+                    textChEl.appendChild(li);
+                } else {
+                    li.onclick = () => joinVoiceChannel(ch.id, ch.name);
+                    voiceChEl.appendChild(li);
+                }
+            });
+        }
+
+        function renderMessages() {
+            messagesEl.innerHTML = "";
+            (allMessages[activeTextChannel] || []).forEach(appendMessage);
+        }
+
+        function appendMessage(msg) {
+            if (msg.channelId !== activeTextChannel) return;
+            const div = document.createElement("div");
+            div.className = "msg";
+            const tag = msg.role === "admin" ? '<span class="admin-tag">ADMIN</span>' : "";
+            div.innerHTML = `<span class="time">[${msg.time}]</span>${tag}<span class="sender"></span><span class="body"></span>`;
+            div.querySelector(".sender").textContent = msg.sender + ":";
+            div.querySelector(".body").textContent = msg.text;
+            messagesEl.appendChild(div);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+        }
+
+        document.getElementById("chat-form").onsubmit = (e) => {
+            e.preventDefault();
+            const inp = document.getElementById("chat-input");
+            if (!inp.value.trim()) return;
+            socket.emit("chat-message", { channelId: activeTextChannel, text: inp.value });
+            inp.value = "";
+        };
+
+        socket.on("chat-message", (msg) => {
+            if (!allMessages[msg.channelId]) allMessages[msg.channelId] = [];
+            allMessages[msg.channelId].push(msg);
+            appendMessage(msg);
+        });
+
+        // --- KULLANICI LİSTESİ, KİŞİ SES AYARI VE ADMİN KONTROL ---
+        socket.on("state-update", ({ users, channels: chs, settings }) => {
+            channels = chs;
+            document.getElementById("time-limit-input").value = settings.voiceTimeLimitMin;
+            renderChannels();
+
+            userListEl.innerHTML = "";
+            users.forEach((u) => {
+                const li = document.createElement("li");
+                li.className = "user-card";
+
+                const top = document.createElement("div");
+                top.className = "user-top";
+                top.innerHTML = `<span>${u.username} ${u.role === "admin" ? "⭐" : ""} ${u.voiceChannel ? "🔊" : ""} ${u.serverMuted ? "🔇" : ""}</span>`;
+                li.appendChild(top);
+
+                // Kişiye özel ses sürgüsü (kendisi hariç seste olanlara)
+                if (u.id !== me?.id && u.voiceChannel) {
+                    const volRow = document.createElement("div");
+                    volRow.className = "vol-row";
+                    const currentVol = userVolumes.has(u.id) ? userVolumes.get(u.id) : 1;
+                    volRow.innerHTML = `<span>Ses</span><input type="range" min="0" max="1" step="0.05" value="${currentVol}" />`;
+                    volRow.querySelector("input").oninput = (e) => {
+                        const v = parseFloat(e.target.value);
+                        userVolumes.set(u.id, v);
+                        const audioEl = document.getElementById("audio-" + u.id);
+                        if (audioEl) audioEl.volume = v;
+                    };
+                    li.appendChild(volRow);
+                }
+
+                // Admin butonları
+                if (me?.role === "admin" && u.id !== me.id) {
+                    const acts = document.createElement("div");
+                    acts.className = "row";
+                    const muteBtn = document.createElement("button");
+                    muteBtn.className = "secondary mini";
+                    muteBtn.textContent = u.serverMuted ? "Sesi Aç" : "Sustur";
+                    muteBtn.onclick = () => socket.emit("admin-toggle-mute", u.id);
+
+                    const kickBtn = document.createElement("button");
+                    kickBtn.className = "danger mini";
+                    kickBtn.textContent = "At (Kick)";
+                    kickBtn.onclick = () => socket.emit("admin-kick", u.id);
+
+                    acts.appendChild(muteBtn);
+                    acts.appendChild(kickBtn);
+                    li.appendChild(acts);
+                }
+
+                userListEl.appendChild(li);
+            });
+        });
+
+        // --- ADMİN PANEL BUTONLARI ---
+        document.getElementById("btn-add-ch").onclick = () => {
+            const name = document.getElementById("new-ch-name").value;
+            const type = document.getElementById("new-ch-type").value;
+            socket.emit("admin-create-channel", { name, type });
+            document.getElementById("new-ch-name").value = "";
+        };
+
+        document.getElementById("btn-set-limit").onclick = () => {
+            const val = document.getElementById("time-limit-input").value;
+            socket.emit("admin-set-time-limit", val);
+        };
+
+        // --- WEBRTC SES + EKRAN PAYLAŞIMI ---
+        function getOrCreatePeer(peerId) {
+            if (peers.has(peerId)) return peers.get(peerId);
+            const pc = new RTCPeerConnection(rtcConfig);
+            peers.set(peerId, pc);
+            pendingCandidates.set(peerId, []);
+
+            if (processedMicStream) {
+                processedMicStream.getTracks().forEach((t) => pc.addTrack(t, processedMicStream));
+            }
+            if (screenStream) {
+                screenStream.getVideoTracks().forEach((t) => pc.addTrack(t, screenStream));
+            }
+
+            pc.onicecandidate = (e) => {
+                if (e.candidate) socket.emit("webrtc-ice", { to: peerId, candidate: e.candidate });
+            };
+
+            pc.ontrack = (e) => {
+                if (e.track.kind === "audio") {
+                    let audio = document.getElementById("audio-" + peerId);
+                    if (!audio) {
+                        audio = document.createElement("audio");
+                        audio.id = "audio-" + peerId;
+                        audio.autoplay = true;
+                        audio.volume = userVolumes.has(peerId) ? userVolumes.get(peerId) : 1;
+                        audioContainer.appendChild(audio);
+                    }
+                    audio.srcObject = e.streams[0];
+                } else if (e.track.kind === "video") {
+                    let video = document.getElementById("video-" + peerId);
+                    if (!video) {
+                        video = document.createElement("video");
+                        video.id = "video-" + peerId;
+                        video.autoplay = true;
+                        video.playsInline = true;
+                        screenStage.appendChild(video);
+                    }
+                    video.srcObject = e.streams[0];
+                    screenStage.style.display = "flex";
+                }
+            };
+
+            return pc;
+        }
+
+        function removePeerVideo(peerId) {
+            const v = document.getElementById("video-" + peerId);
+            if (v) v.remove();
+            if (screenStage.children.length === 0) screenStage.style.display = "none";
+        }
+
+        function closePeer(peerId) {
+            const pc = peers.get(peerId);
+            if (pc) { pc.close(); peers.delete(peerId); }
+            pendingCandidates.delete(peerId);
+            document.getElementById("audio-" + peerId)?.remove();
+            removePeerVideo(peerId);
+        }
+
+        async function flushCandidates(peerId, pc) {
+            const q = pendingCandidates.get(peerId) || [];
+            for (const c of q) await pc.addIceCandidate(c).catch(() => { });
+            pendingCandidates.set(peerId, []);
+        }
+
+        async function joinVoiceChannel(channelId, channelName) {
+            if (currentVoiceChannel === channelId) return;
+            if (currentVoiceChannel) leaveVoiceCleanup();
+
+            try {
+                await initMicStream();
+            } catch (err) {
+                return alert("Mikrofon açılamadı: " + err.message);
+            }
+
+            currentVoiceChannel = channelId;
+            document.getElementById("voice-status").textContent = "Bağlı: " + channelName;
+            document.getElementById("btn-mute").style.display = "block";
+            document.getElementById("btn-screen").style.display = "block";
+            document.getElementById("btn-leave-voice").style.display = "block";
+            renderChannels();
+
+            socket.emit("join-voice", channelId, async (existingPeers) => {
+                for (const peerId of existingPeers) {
+                    const pc = getOrCreatePeer(peerId);
+                    const offer = await pc.createOffer();
+                    await pc.setLocalDescription(offer);
+                    socket.emit("webrtc-offer", { to: peerId, offer });
+                }
+            });
+        }
+
+        function leaveVoiceCleanup() {
+            stopScreenShare();
+            Array.from(peers.keys()).forEach(closePeer);
+            rawMicStream?.getTracks().forEach((t) => t.stop());
+            audioCtx?.close();
+            rawMicStream = processedMicStream = audioCtx = micGainNode = null;
+            currentVoiceChannel = null;
+            document.getElementById("voice-status").textContent = "Ses kanalında değilsin";
+            document.getElementById("btn-mute").style.display = "none";
+            document.getElementById("btn-screen").style.display = "none";
+            document.getElementById("btn-leave-voice").style.display = "none";
+            timerBar.style.display = "none";
+            renderChannels();
+        }
+
+        document.getElementById("btn-leave-voice").onclick = () => {
+            socket.emit("leave-voice");
+            leaveVoiceCleanup();
+        };
+
+        document.getElementById("btn-mute").onclick = () => {
+            if (serverMuted) return;
+            isMuted = !isMuted;
+            applyMuteState();
+        };
+
+        // --- EKRAN PAYLAŞIMI ---
+        document.getElementById("btn-screen").onclick = async () => {
+            if (screenStream) return stopScreenShare();
+            try {
+                screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+            } catch (err) {
+                return alert("Ekran paylaşımı iptal edildi veya izin yok.");
+            }
+
+            const videoTrack = screenStream.getVideoTracks()[0];
+            videoTrack.onended = stopScreenShare;
+            document.getElementById("btn-screen").textContent = "Paylaşımı Durdur";
+            document.getElementById("btn-screen").className = "danger";
+
+            // Mevcut tüm bağlantılara video akışını ekle ve yeniden el sıkış
+            for (const [peerId, pc] of peers.entries()) {
+                pc.addTrack(videoTrack, screenStream);
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                socket.emit("webrtc-offer", { to: peerId, offer });
+            }
+        };
+
+        function stopScreenShare() {
+            if (!screenStream) return;
+            screenStream.getTracks().forEach((t) => t.stop());
+            screenStream = null;
+            document.getElementById("btn-screen").textContent = "Ekran Paylaş";
+            document.getElementById("btn-screen").className = "";
+            socket.emit("screen-share-stopped");
+        }
+
+        // --- SİNYAL VE ADMİN OLAYLARI ---
+        socket.on("webrtc-offer", async ({ from, offer }) => {
+            if (!currentVoiceChannel) return;
+            const pc = getOrCreatePeer(from);
+            await pc.setRemoteDescription(offer);
+            await flushCandidates(from, pc);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            socket.emit("webrtc-answer", { to: from, answer });
+        });
+
+        socket.on("webrtc-answer", async ({ from, answer }) => {
+            const pc = peers.get(from);
+            if (!pc) return;
+            await pc.setRemoteDescription(answer);
+            await flushCandidates(from, pc);
+        });
+
+        socket.on("webrtc-ice", async ({ from, candidate }) => {
+            const pc = peers.get(from);
+            if (!pc) return;
+            if (pc.remoteDescription) await pc.addIceCandidate(candidate).catch(() => { });
+            else pendingCandidates.get(from)?.push(candidate);
+        });
+
+        socket.on("user-left-voice", closePeer);
+        socket.on("screen-share-stopped", removePeerVideo);
+
+        socket.on("server-mute-status", (muted) => {
+            serverMuted = muted;
+            applyMuteState();
+        });
+
+        socket.on("kicked", (reason) => {
+            alert(reason);
+            location.reload();
+        });
+
+        socket.on("force-leave-voice", (reason) => {
+            alert(reason);
+            leaveVoiceCleanup();
+        });
+
+        socket.on("voice-timer", ({ channelId, remainingSec }) => {
+            if (channelId !== currentVoiceChannel || remainingSec === null) {
+                timerBar.style.display = "none";
+                return;
+            }
+            const m = String(Math.floor(remainingSec / 60)).padStart(2, "0");
+            const s = String(remainingSec % 60).padStart(2, "0");
+            timerBar.textContent = `Kalan Yayın Süresi: ${m}:${s}`;
+            timerBar.style.display = "block";
+        });
+    </script>
+</body>
+
+</html>
