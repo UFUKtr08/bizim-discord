@@ -3,1339 +3,533 @@
 
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport"
-        content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#1e1f22" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#111214" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>BizimDiscord</title>
-    <style>
-        :root {
-            --bg-app: #313338;
-            --bg-sidebar: #2b2d31;
-            --bg-dark: #1e1f22;
-            --bg-panel: #232428;
-            --bg-hover: #35373c;
-            --bg-active: #404249;
-            --text-main: #dbdee1;
-            --text-bright: #ffffff;
-            --text-muted: #949ba4;
-            --accent: #5865f2;
-            --success: #23a559;
-            --danger: #da373c;
-            --warn: #f0b232;
-            --border: #1e1f22;
-            --font-size: 14px;
-        }
-
-        body[data-theme="amoled"] {
-            --bg-app: #000000;
-            --bg-sidebar: #09090b;
-            --bg-dark: #000000;
-            --bg-panel: #111114;
-            --bg-hover: #18181c;
-            --bg-active: #23232a;
-            --border: #1f1f24;
-        }
-
-        body[data-theme="cyber"] {
-            --bg-app: #0f1020;
-            --bg-sidebar: #16172d;
-            --bg-dark: #090a14;
-            --bg-panel: #121326;
-            --bg-hover: #212345;
-            --bg-active: #2b2e5e;
-            --border: #25274a;
-        }
-
-        body[data-theme="forest"] {
-            --bg-app: #1b2420;
-            --bg-sidebar: #141c18;
-            --bg-dark: #0d1310;
-            --bg-panel: #111815;
-            --bg-hover: #22302a;
-            --bg-active: #2a3c34;
-            --border: #0c120f;
-        }
-
-        body[data-theme="light"] {
-            --bg-app: #ffffff;
-            --bg-sidebar: #f2f3f5;
-            --bg-dark: #e3e5e8;
-            --bg-panel: #ebedef;
-            --bg-hover: #e4e6eb;
-            --bg-active: #d4d7dc;
-            --text-main: #2e3338;
-            --text-bright: #060607;
-            --text-muted: #5c6370;
-            --border: #dcdfe4;
-        }
-
-        body.game-mode * {
-            transition: none !important;
-            animation: none !important;
-            box-shadow: none !important;
-            backdrop-filter: none !important;
-        }
-
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-            -webkit-tap-highlight-color: transparent;
-        }
-
-        body {
-            background: var(--bg-app);
-            color: var(--text-main);
-            height: 100dvh;
-            display: flex;
-            overflow: hidden;
-            user-select: none;
-            font-size: var(--font-size);
-        }
-
-        button {
-            background: var(--accent);
-            color: #fff;
-            border: none;
-            padding: 8px 12px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: 600;
-            font-size: 13px;
-        }
-
-        button:hover {
-            filter: brightness(1.08);
-        }
-
-        button.danger {
-            background: var(--danger);
-        }
-
-        button.success {
-            background: var(--success);
-        }
-
-        button.secondary {
-            background: var(--bg-hover);
-            color: var(--text-bright);
-        }
-
-        button.mini {
-            padding: 4px 8px;
-            font-size: 11.5px;
-        }
-
-        input,
-        select {
-            background: var(--bg-dark);
-            border: 1px solid var(--bg-active);
-            color: var(--text-bright);
-            padding: 8px 10px;
-            border-radius: 6px;
-            outline: none;
-            font-size: 13px;
-        }
-
-        input:focus,
-        select:focus {
-            border-color: var(--accent);
-        }
-
-        ::-webkit-scrollbar {
-            width: 6px;
-            height: 6px;
-        }
-
-        ::-webkit-scrollbar-thumb {
-            background: var(--bg-active);
-            border-radius: 4px;
-        }
-
-        /* Modallar & Çekmece Arka Planı */
-        .overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.75);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 40;
-            padding: 12px;
-        }
-
-        .overlay.show {
-            display: flex;
-        }
-
-        #lightbox {
-            z-index: 50;
-        }
-
-        #drawer-backdrop {
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.6);
-            display: none;
-            z-index: 25;
-        }
-
-        #drawer-backdrop.show {
-            display: block;
-        }
-
-        .modal-box {
-            background: var(--bg-sidebar);
-            border: 1px solid var(--border);
-            padding: 20px;
-            border-radius: 12px;
-            width: 430px;
-            max-width: 100%;
-            max-height: 90dvh;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 11px;
-        }
-
-        .modal-box.wide {
-            width: 700px;
-        }
-
-        .modal-hdr {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            color: var(--text-bright);
-            font-weight: 700;
-            font-size: 16px;
-            gap: 8px;
-        }
-
-        .row {
-            display: flex;
-            gap: 6px;
-            align-items: center;
-        }
-
-        .row>button {
-            flex: 1;
-        }
-
-        /* Sol Panel */
-        #sidebar {
-            width: 268px;
-            background: var(--bg-sidebar);
-            display: flex;
-            flex-direction: column;
-            border-right: 1px solid var(--border);
-            flex-shrink: 0;
-        }
-
-        .brand-hdr {
-            padding: 12px 14px;
-            font-weight: 800;
-            color: var(--text-bright);
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .health-pill {
-            font-size: 11px;
-            font-weight: 700;
-            color: var(--success);
-            background: var(--bg-dark);
-            padding: 4px 8px;
-            border-radius: 12px;
-            white-space: nowrap;
-            cursor: pointer;
-            border: 1px solid var(--bg-active);
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-
-        .health-pill:hover {
-            border-color: var(--accent);
-        }
-
-        .section-hdr {
-            padding: 11px 14px 5px;
-            font-size: 11px;
-            font-weight: 700;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .channel-list {
-            list-style: none;
-            padding: 0 8px;
-            overflow-y: auto;
-        }
-
-        .channel-item {
-            padding: 8px 10px;
-            border-radius: 6px;
-            cursor: pointer;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 2px;
-            color: var(--text-muted);
-        }
-
-        .channel-item:hover {
-            background: var(--bg-hover);
-            color: var(--text-main);
-        }
-
-        .channel-item.active {
-            background: var(--bg-active);
-            color: var(--text-bright);
-            font-weight: 600;
-        }
-
-        .unread-dot {
-            background: var(--danger);
-            color: #fff;
-            font-size: 10px;
-            font-weight: 700;
-            padding: 1px 6px;
-            border-radius: 10px;
-        }
-
-        .voice-occupants {
-            list-style: none;
-            padding: 2px 0 6px 18px;
-            display: flex;
-            flex-direction: column;
-            gap: 3px;
-        }
-
-        .voice-occ-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 4px 8px;
-            border-radius: 5px;
-            font-size: 12.5px;
-            color: var(--text-main);
-        }
-
-        .voice-occ-left {
-            display: flex;
-            align-items: center;
-            gap: 7px;
-            min-width: 0;
-        }
-
-        .mini-avatar {
-            width: 22px;
-            height: 22px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 10px;
-            font-weight: 700;
-            color: #fff;
-            border: 2px solid transparent;
-            flex-shrink: 0;
-        }
-
-        .mini-avatar.speaking {
-            border-color: var(--success);
-        }
-
-        .live-pill {
-            background: var(--danger);
-            color: #fff;
-            font-size: 9px;
-            font-weight: 800;
-            padding: 1px 5px;
-            border-radius: 4px;
-        }
-
-        .cam-pill {
-            background: var(--accent);
-            color: #fff;
-            font-size: 9px;
-            font-weight: 800;
-            padding: 1px 5px;
-            border-radius: 4px;
-        }
-
-        /* Alt Ses & Kamera Paneli */
-        #voice-panel {
-            margin-top: auto;
-            padding: 10px 12px;
-            background: var(--bg-panel);
-            display: flex;
-            flex-direction: column;
-            gap: 7px;
-            border-top: 1px solid var(--border);
-        }
-
-        .mic-meter-bg {
-            height: 6px;
-            background: var(--bg-dark);
-            border-radius: 4px;
-            overflow: hidden;
-            position: relative;
-        }
-
-        .mic-meter-fill {
-            height: 100%;
-            width: 0%;
-            background: var(--success);
-        }
-
-        .mic-meter-fill.gated {
-            background: #6b7280;
-        }
-
-        .gate-marker {
-            position: absolute;
-            top: 0;
-            bottom: 0;
-            width: 2px;
-            background: var(--danger);
-            pointer-events: none;
-        }
-
-        .ptt-badge {
-            font-size: 11px;
-            text-align: center;
-            padding: 4px;
-            border-radius: 5px;
-            background: var(--bg-dark);
-            color: var(--warn);
-            display: none;
-            font-weight: 600;
-        }
-
-        .ptt-badge.active {
-            background: var(--success);
-            color: #fff;
-        }
-
-        .me-bar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding-top: 6px;
-            border-top: 1px solid var(--bg-hover);
-            gap: 6px;
-        }
-
-        .me-info {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            min-width: 0;
-        }
-
-        .me-avatar {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 800;
-            color: #fff;
-            flex-shrink: 0;
-            border: 2px solid transparent;
-        }
-
-        .me-avatar.speaking {
-            border-color: var(--success);
-        }
-
-        /* Orta Alan */
-        #main {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            min-width: 0;
-            height: 100%;
-        }
-
-        #topbar {
-            padding: 9px 14px;
-            background: var(--bg-app);
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 8px;
-            flex-shrink: 0;
-        }
-
-        .mobile-only {
-            display: none;
-        }
-
-        .ch-meta {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            min-width: 0;
-        }
-
-        .ch-title {
-            font-weight: 700;
-            color: var(--text-bright);
-            white-space: nowrap;
-        }
-
-        .ch-topic {
-            font-size: 12px;
-            color: var(--text-muted);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .topbar-right {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            flex-shrink: 0;
-        }
-
-        #search-input {
-            width: 130px;
-            padding: 5px 8px;
-            font-size: 12px;
-        }
-
-        /* CANLI VİDEO & EKRAN SAHNESİ (Izgara + Spotlight) */
-        #media-stage {
-            background: #0d0e11;
-            display: none;
-            flex-direction: column;
-            border-bottom: 2px solid var(--border);
-            flex-shrink: 0;
-            max-height: 58dvh;
-        }
-
-        #media-stage.stage-expanded {
-            flex: 1;
-            max-height: none;
-            min-height: 0;
-        }
-
-        .stage-toolbar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 6px 12px;
-            background: #16171b;
-            border-bottom: 1px solid #26272d;
-            font-size: 12px;
-            color: #dbdee1;
-            gap: 8px;
-        }
-
-        #stage-tiles {
-            display: grid;
-            grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr));
-            gap: 10px;
-            padding: 10px;
-            overflow-y: auto;
-            align-content: start;
-            flex: 1;
-        }
-
-        /* Spotlight Modu: Seçilen kart en üstte tam genişlik, diğerleri alt şeritte */
-        #stage-tiles.spotlight-mode {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: center;
-            align-content: flex-start;
-        }
-
-        #stage-tiles.spotlight-mode .media-tile {
-            width: 175px;
-            height: 104px;
-            aspect-ratio: auto;
-            order: 2;
-            opacity: 0.9;
-        }
-
-        #stage-tiles.spotlight-mode .media-tile.is-spotlight {
-            width: 100%;
-            max-width: 960px;
-            height: auto;
-            aspect-ratio: 16 / 9;
-            max-height: 44dvh;
-            order: 1;
-            opacity: 1;
-            border-color: var(--accent);
-        }
-
-        #media-stage.stage-expanded #stage-tiles.spotlight-mode .media-tile.is-spotlight {
-            max-height: 64dvh;
-        }
-
-        .media-tile {
-            position: relative;
-            background: #18191e;
-            border: 2px solid #2b2d36;
-            border-radius: 10px;
-            overflow: hidden;
-            aspect-ratio: 16 / 9;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .media-tile:hover {
-            border-color: var(--accent);
-        }
-
-        .media-tile.speaking {
-            border-color: var(--success);
-        }
-
-        .media-tile video {
-            width: 100%;
-            height: 100%;
-            background: #000;
-            display: block;
-            object-fit: cover;
-        }
-
-        .media-tile.is-screen video {
-            object-fit: contain;
-        }
-
-        .media-tile video.mirrored {
-            transform: scaleX(-1);
-        }
-
-        .tile-overlay-bar {
-            position: absolute;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            padding: 6px 8px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: linear-gradient(transparent, rgba(0, 0, 0, 0.82));
-            font-size: 12px;
-            color: #fff;
-            gap: 6px;
-        }
-
-        .tile-label {
-            font-weight: 600;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .tile-btns {
-            display: flex;
-            gap: 4px;
-            flex-shrink: 0;
-        }
-
-        .tile-btns button {
-            padding: 3px 6px;
-            font-size: 11px;
-            background: rgba(30, 31, 34, 0.85);
-            color: #fff;
-        }
-
-        .tile-btns button:hover {
-            background: var(--accent);
-        }
-
-        /* Sohbet */
-        #messages {
-            flex: 1;
-            padding: 14px 16px;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            user-select: text;
-            min-height: 0;
-        }
-
-        #messages.hidden-by-stage {
-            display: none;
-        }
-
-        .msg {
-            position: relative;
-            padding: 6px 10px;
-            border-radius: 8px;
-            line-height: 1.45;
-        }
-
-        .msg:hover,
-        .msg.show-actions {
-            background: var(--bg-hover);
-        }
-
-        .msg.mentioned {
-            background: rgba(240, 178, 50, 0.14);
-            border-left: 3px solid var(--warn);
-        }
-
-        .msg.pinned-msg {
-            border-left: 3px solid var(--accent);
-        }
-
-        .msg-reply-preview {
-            font-size: 12px;
-            color: var(--text-muted);
-            border-left: 2px solid var(--accent);
-            padding-left: 8px;
-            margin-bottom: 4px;
-        }
-
-        .msg-header {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            flex-wrap: wrap;
-        }
-
-        .msg .sender {
-            font-weight: 700;
-        }
-
-        .msg .time {
-            color: var(--text-muted);
-            font-size: 11px;
-        }
-
-        .msg .admin-tag {
-            background: var(--danger);
-            color: #fff;
-            font-size: 9px;
-            padding: 1px 5px;
-            border-radius: 4px;
-            font-weight: 700;
-        }
-
-        .msg .pin-tag {
-            color: var(--warn);
-            font-size: 11px;
-        }
-
-        .msg .body {
-            margin-top: 2px;
-            word-break: break-word;
-        }
-
-        .msg a {
-            color: #00a8fc;
-            text-decoration: none;
-        }
-
-        .msg .mention-hl {
-            background: rgba(88, 101, 242, 0.35);
-            color: #fff;
-            padding: 0 4px;
-            border-radius: 4px;
-            font-weight: 600;
-        }
-
-        .msg img.chat-img {
-            max-width: 100%;
-            max-height: 250px;
-            border-radius: 8px;
-            display: block;
-            margin-top: 6px;
-            cursor: zoom-in;
-            border: 1px solid var(--bg-active);
-        }
-
-        .msg-actions {
-            position: absolute;
-            right: 8px;
-            top: -10px;
-            background: var(--bg-panel);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 2px 4px;
-            display: none;
-            gap: 3px;
-            z-index: 5;
-        }
-
-        .msg:hover .msg-actions,
-        .msg.show-actions .msg-actions {
-            display: flex;
-        }
-
-        .msg-actions button {
-            padding: 3px 6px;
-            font-size: 12px;
-            background: transparent;
-            color: var(--text-main);
-        }
-
-        .reactions-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 5px;
-            margin-top: 5px;
-        }
-
-        .react-pill {
-            background: var(--bg-panel);
-            border: 1px solid var(--bg-active);
-            border-radius: 12px;
-            padding: 2px 7px;
-            font-size: 12px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            color: var(--text-main);
-        }
-
-        .react-pill.mine {
-            border-color: var(--accent);
-            background: rgba(88, 101, 242, 0.22);
-            color: #fff;
-        }
-
-        #mobile-voice-bar {
-            display: none;
-            padding: 7px 10px;
-            background: var(--bg-panel);
-            border-top: 1px solid var(--border);
-            gap: 6px;
-            align-items: center;
-            justify-content: space-between;
-            flex-shrink: 0;
-        }
-
-        #mobile-voice-bar button {
-            flex: 1;
-            padding: 8px 6px;
-            font-size: 12px;
-        }
-
-        #reply-banner {
-            display: none;
-            padding: 6px 14px;
-            background: var(--bg-panel);
-            border-top: 1px solid var(--border);
-            font-size: 12px;
-            color: var(--text-muted);
-            justify-content: space-between;
-            align-items: center;
-            flex-shrink: 0;
-        }
-
-        #typing-bar {
-            min-height: 18px;
-            padding: 0 14px 2px;
-            font-size: 11.5px;
-            color: var(--text-muted);
-            font-style: italic;
-            flex-shrink: 0;
-        }
-
-        #chat-form {
-            padding: 9px 12px calc(9px + env(safe-area-inset-bottom));
-            background: var(--bg-sidebar);
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            border-top: 1px solid var(--border);
-            flex-shrink: 0;
-        }
-
-        #chat-input {
-            flex: 1;
-            min-width: 0;
-        }
-
-        /* Sağ Panel */
-        #rightbar {
-            width: 260px;
-            background: var(--bg-sidebar);
-            border-left: 1px solid var(--border);
-            display: flex;
-            flex-direction: column;
-            flex-shrink: 0;
-        }
-
-        #user-list {
-            list-style: none;
-            padding: 8px;
-            overflow-y: auto;
-            flex: 1;
-        }
-
-        .user-card {
-            background: var(--bg-app);
-            padding: 9px;
-            border-radius: 8px;
-            margin-bottom: 7px;
-            font-size: 13px;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            border: 2px solid transparent;
-        }
-
-        .user-card.speaking {
-            border-color: var(--success);
-        }
-
-        .user-top {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .user-status {
-            font-size: 11px;
-            color: var(--text-muted);
-            margin-top: -3px;
-        }
-
-        .vol-row {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 11px;
-            color: var(--text-muted);
-        }
-
-        .vol-row input[type="range"] {
-            flex: 1;
-            padding: 0;
-        }
-
-        /* Sağlık Paneli */
-        .health-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
-            gap: 8px;
-        }
-
-        .stat-card {
-            background: var(--bg-dark);
-            border: 1px solid var(--bg-active);
-            border-radius: 8px;
-            padding: 10px;
-            display: flex;
-            flex-direction: column;
-            gap: 3px;
-        }
-
-        .stat-lbl {
-            font-size: 11px;
-            color: var(--text-muted);
-        }
-
-        .stat-val {
-            font-size: 16px;
-            font-weight: 800;
-            color: var(--text-bright);
-        }
-
-        .health-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 12px;
-        }
-
-        .health-table th,
-        .health-table td {
-            padding: 7px 6px;
-            text-align: left;
-            border-bottom: 1px solid var(--bg-active);
-        }
-
-        .health-table th {
-            color: var(--text-muted);
-            font-weight: 600;
-        }
-
-        .tag-p2p {
-            background: rgba(35, 165, 89, 0.2);
-            color: var(--success);
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-weight: 700;
-            font-size: 11px;
-        }
-
-        .tag-turn {
-            background: rgba(240, 178, 50, 0.2);
-            color: var(--warn);
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-weight: 700;
-            font-size: 11px;
-        }
-
-        /* Ekran Seçici */
-        .source-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-            gap: 10px;
-            max-height: 350px;
-            overflow-y: auto;
-        }
-
-        .source-card {
-            background: var(--bg-dark);
-            border: 2px solid transparent;
-            border-radius: 8px;
-            padding: 8px;
-            cursor: pointer;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-
-        .source-card.selected {
-            border-color: var(--accent);
-            background: var(--bg-hover);
-        }
-
-        .source-card img {
-            width: 100%;
-            height: 96px;
-            object-fit: cover;
-            border-radius: 5px;
-            background: #000;
-        }
-
-        .source-card span {
-            font-size: 12px;
-            color: var(--text-bright);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        #lightbox img {
-            max-width: 92vw;
-            max-height: 88dvh;
-            border-radius: 10px;
-        }
-
-        .tab-bar {
-            display: flex;
-            gap: 6px;
-            border-bottom: 1px solid var(--bg-active);
-            padding-bottom: 8px;
-            flex-wrap: wrap;
-        }
-
-        .tab-btn {
-            flex: 1;
-            background: var(--bg-dark);
-            color: var(--text-muted);
-            white-space: nowrap;
-        }
-
-        .tab-btn.active {
-            background: var(--accent);
-            color: #fff;
-        }
-
-        .tab-pane {
-            display: none;
-            flex-direction: column;
-            gap: 10px;
-            font-size: 13px;
-        }
-
-        .tab-pane.active {
-            display: flex;
-        }
-
-        .field-lbl {
-            font-size: 11.5px;
-            color: var(--text-muted);
-            font-weight: 600;
-            margin-bottom: -6px;
-        }
-
-        .dsp-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 7px;
-            background: var(--bg-dark);
-            padding: 10px;
-            border-radius: 8px;
-        }
-
-        .db-box {
-            font-size: 11px;
-            color: var(--success);
-            background: var(--bg-dark);
-            padding: 8px;
-            border-radius: 6px;
-            word-break: break-all;
-        }
-
-        /* MOBİL RESPONSIVE TASARIM (Telefon & Tablet) */
-        @media (max-width: 860px) {
-            .mobile-only {
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-            }
-
-            .ch-topic,
-            #search-input,
-            #btn-game-mode {
-                display: none;
-            }
-
-            #sidebar,
-            #rightbar {
-                position: fixed;
-                top: 0;
-                bottom: 0;
-                z-index: 30;
-                transition: transform 0.2s ease;
-                width: 82vw;
-                max-width: 300px;
-            }
-
-            #sidebar {
-                left: 0;
-                transform: translateX(-105%);
-            }
-
-            #sidebar.drawer-open {
-                transform: translateX(0);
-            }
-
-            #rightbar {
-                right: 0;
-                transform: translateX(105%);
-            }
-
-            #rightbar.drawer-open {
-                transform: translateX(0);
-            }
-
-            #mobile-voice-bar.in-voice {
-                display: flex;
-            }
-
-            #stage-tiles {
-                padding: 8px;
-                gap: 8px;
-            }
-
-            #stage-tiles.spotlight-mode .media-tile {
-                width: 120px;
-                height: 74px;
-            }
-
-            #stage-tiles.spotlight-mode .media-tile.is-spotlight {
-                max-height: 38dvh;
-            }
-
-            .dsp-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/style.css" />
 </head>
 
-<body>
+<body data-theme="dark">
 
-    <div id="drawer-backdrop" onclick="closeDrawers()"></div>
+    <!-- MOBİL ÇEKMECE ARKA PLANI -->
+    <div id="drawer-backdrop"></div>
 
-    <!-- GİRİŞ / KAYIT -->
+    <!-- TOAST BİLDİRİM ALANI -->
+    <div id="toast-container" aria-live="polite"></div>
+
+    <!-- GİRİŞ / KAYIT EKRANI -->
     <div id="auth-overlay" class="overlay show">
-        <div class="modal-box" style="width:360px;">
-            <h2 id="auth-title" style="text-align:center; color:var(--text-bright);">BizimDiscord</h2>
-            <p id="auth-hint" style="font-size:12px; color:var(--text-muted); text-align:center;">
-                İlk kayıt olan hesap otomatik Admin olur.
-            </p>
-            <input id="auth-user" placeholder="Kullanıcı adı (harf/rakam)" autocomplete="username" />
-            <input id="auth-pass" type="password" placeholder="Şifre (en az 4 karakter)"
-                autocomplete="current-password" />
-            <input id="auth-invite" placeholder="Sunucu Davet Kodu (Kayıt için)" style="display:none;" />
-            <label class="row" style="font-size:12px; color:var(--text-muted); cursor:pointer;">
-                <input id="auth-remember" type="checkbox" checked /> Oturumu Hatırla (Tekrar şifre sormaz)
-            </label>
-            <div class="row">
-                <button id="btn-login" class="success">Giriş Yap</button>
-                <button id="btn-register">Kayıt Ol</button>
+        <div class="modal-box auth-card">
+            <div class="auth-logo">
+                <img src="/icon.svg" alt="BizimDiscord" width="44" height="44" />
             </div>
-            <small id="auth-err" style="color:var(--danger); text-align:center;"></small>
+            <h2 id="auth-title">BizimDiscord</h2>
+            <p id="auth-hint" class="muted-note center">
+                İlk kayıt olan hesap otomatik Genel Yönetici olur.
+            </p>
+            <div class="field-group">
+                <input id="auth-user" placeholder="Kullanıcı adı (harf/rakam)" autocomplete="username" />
+                <input id="auth-pass" type="password" placeholder="Şifre (en az 4 karakter)"
+                    autocomplete="current-password" />
+                <input id="auth-invite" placeholder="Sunucu Davet Kodu (isteğe bağlı / kayıt için)"
+                    style="display:none;" />
+            </div>
+            <label class="check-row">
+                <input id="auth-remember" type="checkbox" checked />
+                <span>Oturumu Hatırla</span>
+            </label>
+            <div class="btn-row">
+                <button id="btn-login" class="btn primary">Giriş Yap</button>
+                <button id="btn-register" class="btn secondary">Kayıt Ol</button>
+            </div>
+            <small id="auth-err" class="error-text center"></small>
         </div>
     </div>
 
-    <!-- SOL PANEL (KANALLAR & SES/KAMERA KONTROLÜ) -->
-    <aside id="sidebar">
-        <div class="brand-hdr">
-            <span id="server-name-lbl"
-                style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">BizimDiscord</span>
-            <button id="health-pill" class="health-pill" title="Bağlantı & Sistem Sağlığı Detayları">
-                <span id="health-dot">🟢</span><span id="ping-badge">-- ms</span>
-            </button>
-        </div>
+    <!-- ANA UYGULAMA KABUĞU -->
+    <div id="app-shell">
 
-        <div class="section-hdr">Metin Kanalları</div>
-        <ul id="text-channels" class="channel-list" style="max-height: 27%;"></ul>
+        <!-- SOL ÇEKMECE SARICI (Sunucu Şeridi + Kanal Paneli) -->
+        <div id="left-dock">
 
-        <div class="section-hdr">Ses & Kamera Kanalları</div>
-        <ul id="voice-channels" class="channel-list" style="flex:1;"></ul>
+            <!-- EN SOL: İNCE SUNUCU GEÇİŞ ŞERİDİ -->
+            <nav id="server-rail" aria-label="Sunucular">
+                <button id="btn-dm-rail" class="rail-btn rail-dm" title="1-1 Fısıltılar (DM)">
+                    <span class="rail-icon">💬</span>
+                    <span id="dm-unread-dot" class="rail-dot" style="display:none;"></span>
+                </button>
 
-        <div id="voice-panel">
-            <div id="voice-status" style="font-size:12px; color:var(--text-muted); font-weight:600;">Ses kanalında
-                değilsin</div>
-            <div id="ptt-indicator" class="ptt-badge">Bas-Konuş: [V] Tuşuna Basılı Tut</div>
-            <div class="mic-meter-bg">
-                <div id="mic-meter" class="mic-meter-fill"></div>
-                <div id="sidebar-gate-line" class="gate-marker" style="left:22%;"></div>
-            </div>
+                <div class="rail-sep"></div>
 
-            <div class="row" id="voice-btns-1" style="display:none;">
-                <button id="btn-mute" class="secondary">Mikrofon</button>
-                <button id="btn-deafen" class="secondary">Kulaklık</button>
-            </div>
-            <div class="row" id="voice-btns-2" style="display:none;">
-                <button id="btn-cam" class="secondary">📹 Kamera</button>
-                <button id="btn-screen" class="secondary">🖥️ Ekran</button>
-            </div>
-            <div class="row" id="voice-btns-3" style="display:none;">
-                <button id="btn-flip-cam" class="secondary" style="display:none;">🔄 Kamera Çevir</button>
-                <button id="btn-leave-voice" class="danger">Kanaldan Ayrıl</button>
-            </div>
+                <div id="server-list" class="rail-list"></div>
 
-            <div class="me-bar">
-                <div class="me-info">
-                    <div id="me-avatar" class="me-avatar" style="background:#5865f2;">?</div>
-                    <div style="min-width:0;">
-                        <div id="me-name"
-                            style="font-weight:700; color:var(--text-bright); font-size:13px; overflow:hidden; text-overflow:ellipsis;">
-                            -</div>
-                        <div id="me-status"
-                            style="font-size:11px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                            Çevrimiçi</div>
+                <div class="rail-sep"></div>
+
+                <button id="btn-add-server" class="rail-btn rail-add" title="Sunucu Oluştur veya Davet Koduyla Katıl">
+                    <span>+</span>
+                </button>
+            </nav>
+
+            <!-- KANAL & SES KONTROL PANELİ -->
+            <aside id="sidebar">
+                <header class="brand-hdr">
+                    <button id="btn-server-menu" class="server-title-btn" title="Sunucu Bilgisi & Davet">
+                        <span id="server-name-lbl">BizimDiscord</span>
+                        <span class="caret">▾</span>
+                    </button>
+                    <button id="health-pill" class="health-pill" title="Bağlantı & Sistem Sağlığı">
+                        <span id="health-dot" class="dot-ind"></span>
+                        <span id="ping-badge">-- ms</span>
+                    </button>
+                </header>
+
+                <div class="sidebar-scroll">
+                    <div class="section-hdr">
+                        <span>METİN KANALLARI</span>
+                        <button id="btn-quick-add-text" class="icon-mini" title="Yeni Metin Kanalı"
+                            style="display:none;">+</button>
+                    </div>
+                    <ul id="text-channels" class="channel-list"></ul>
+
+                    <div class="section-hdr">
+                        <span>SES & KAMERA</span>
+                        <button id="btn-quick-add-voice" class="icon-mini" title="Yeni Ses Kanalı"
+                            style="display:none;">+</button>
+                    </div>
+                    <ul id="voice-channels" class="channel-list"></ul>
+                </div>
+
+                <!-- ALT SES & PROFİL PANELİ -->
+                <div id="voice-panel">
+                    <div id="voice-conn-wrap" style="display:none;">
+                        <div class="voice-conn-top">
+                            <div class="voice-conn-meta">
+                                <span id="voice-status" class="voice-status-lbl">Bağlı</span>
+                                <span id="voice-channel-sub" class="voice-sub-lbl"></span>
+                            </div>
+                            <button id="btn-leave-voice" class="icon-btn danger-soft"
+                                title="Ses Kanalından Ayrıl">✕</button>
+                        </div>
+
+                        <div id="ptt-indicator" class="ptt-badge">Bas-Konuş: [V] Basılı Tut</div>
+
+                        <div class="mic-meter-bg" title="Mikrofon Seviyesi & Noise Gate">
+                            <div id="mic-meter" class="mic-meter-fill"></div>
+                            <div id="sidebar-gate-line" class="gate-marker" style="left:22%;"></div>
+                        </div>
+
+                        <div class="voice-actions">
+                            <button id="btn-mute" class="v-act-btn" title="Mikrofon (Alt+M)">🎙️</button>
+                            <button id="btn-deafen" class="v-act-btn" title="Kulaklık (Alt+D)">🎧</button>
+                            <button id="btn-cam" class="v-act-btn" title="Kamera">📹</button>
+                            <button id="btn-screen" class="v-act-btn" title="Ekran Paylaş">🖥️</button>
+                            <button id="btn-flip-cam" class="v-act-btn" title="Kamera Çevir"
+                                style="display:none;">🔄</button>
+                        </div>
+                    </div>
+
+                    <div class="me-bar">
+                        <div class="me-info" id="btn-profile-quick" title="Profil & Ayarlar">
+                            <div id="me-avatar" class="avatar-circle sm">?</div>
+                            <div class="me-text">
+                                <div id="me-name" class="me-name">-</div>
+                                <div id="me-status" class="me-status">Çevrimiçi</div>
+                            </div>
+                        </div>
+                        <div class="me-controls">
+                            <button id="btn-open-settings" class="icon-btn" title="Ayarlar">⚙️</button>
+                            <button id="btn-logout" class="icon-btn" title="Çıkış Yap">🚪</button>
+                        </div>
                     </div>
                 </div>
-                <div class="row" style="flex:0;">
-                    <button id="btn-open-settings" class="secondary mini" title="Ayarlar">⚙️</button>
-                    <button id="btn-logout" class="secondary mini" title="Çıkış">🚪</button>
+            </aside>
+        </div>
+
+        <!-- ORTA ANA ALAN -->
+        <main id="main">
+            <header id="topbar">
+                <div class="ch-meta">
+                    <button id="btn-mobile-left" class="icon-btn mobile-only" title="Sunucular & Kanallar">☰</button>
+                    <span id="active-channel-title" class="ch-title"># genel-sohbet</span>
+                    <span id="active-channel-topic" class="ch-topic"></span>
                 </div>
-            </div>
-        </div>
-    </aside>
 
-    <!-- ORTA ALAN -->
-    <main id="main">
-        <div id="topbar">
-            <div class="ch-meta">
-                <button class="secondary mini mobile-only" onclick="toggleDrawer('sidebar')">☰</button>
-                <span id="active-channel-title" class="ch-title"># genel-sohbet</span>
-                <span id="active-channel-topic" class="ch-topic"></span>
-            </div>
-            <div class="topbar-right">
-                <button id="btn-game-mode" class="secondary mini" title="Oyun FPS koruması">🎮 Oyun Modu:
-                    Kapalı</button>
-                <button id="btn-open-health-top" class="secondary mini" title="Bağlantı & Sistem Sağlığı">🩺</button>
-                <input id="search-input" placeholder="Mesaj ara..." />
-                <button id="btn-pins" class="secondary mini" title="Sabitlenen Mesajlar">📌</button>
-                <button id="btn-refresh" class="secondary mini" title="Güncelle">🔄</button>
-                <button class="secondary mini mobile-only" onclick="toggleDrawer('rightbar')">👥</button>
-            </div>
-        </div>
+                <div class="topbar-right">
+                    <!-- EKİP & OYUN ARAÇLARI TEK TEMİZ MENÜ -->
+                    <div class="tools-wrap">
+                        <button id="btn-tools-menu" class="pill-btn" title="Ekip & Oyun Araçları">
+                            <span>🧰</span><span class="hide-sm">Araçlar</span>
+                        </button>
+                        <div id="tools-popover" class="popover-menu" role="menu">
+                            <button class="pop-item" data-tool="ready-check">
+                                <span class="pop-ic">✅</span>
+                                <span class="pop-tx"><strong>Hazır Kontrolü</strong><small>Maça hazır
+                                        mısınız?</small></span>
+                            </button>
+                            <button class="pop-item" data-tool="poll">
+                                <span class="pop-ic">📊</span>
+                                <span class="pop-tx"><strong>Hızlı Anket</strong><small>Hangi oyunu
+                                        oynayalım?</small></span>
+                            </button>
+                            <button class="pop-item" data-tool="watch">
+                                <span class="pop-ic">📺</span>
+                                <span class="pop-tx"><strong>Ortak İzleme</strong><small>Senkronize
+                                        YouTube</small></span>
+                            </button>
+                            <button class="pop-item" data-tool="soundboard">
+                                <span class="pop-ic">🔊</span>
+                                <span class="pop-tx"><strong>Ekip Soundboard</strong><small>Ses kanalına efekt
+                                        çal</small></span>
+                            </button>
+                            <button class="pop-item" data-tool="board">
+                                <span class="pop-ic">✏️</span>
+                                <span class="pop-tx"><strong>Taktik Tahtası</strong><small>Ortak strateji
+                                        çizimi</small></span>
+                            </button>
+                            <div class="pop-sep"></div>
+                            <button class="pop-item" data-tool="dm">
+                                <span class="pop-ic">💬</span>
+                                <span class="pop-tx"><strong>1-1 Fısıltılar</strong><small>Özel mesajlar</small></span>
+                            </button>
+                        </div>
+                    </div>
 
-        <!-- CANLI KAMERA VE EKRAN PAYLAŞIMI SAHNESİ -->
-        <section id="media-stage">
-            <div class="stage-toolbar">
-                <span id="stage-count-lbl">Canlı Sahne</span>
-                <div class="row" style="flex:0;">
-                    <button id="btn-exit-spotlight" class="secondary mini" style="display:none;">Izgaraya Dön</button>
-                    <button id="btn-expand-stage" class="secondary mini">Tam Sahne</button>
+                    <button id="btn-game-mode" class="pill-btn"
+                        title="Oyun FPS Koruması (Gereksiz animasyon ve video yükünü azaltır)">
+                        <span>🎮</span><span id="game-mode-lbl" class="hide-md">Oyun Modu</span>
+                    </button>
+
+                    <div class="search-wrap hide-xs">
+                        <input id="search-input" placeholder="Ara..." autocomplete="off" />
+                    </div>
+
+                    <button id="btn-pins" class="icon-btn" title="Sabitlenen Mesajlar">📌</button>
+                    <button id="btn-open-health-top" class="icon-btn" title="Bağlantı & Sistem Sağlığı">🩺</button>
+                    <button id="btn-mobile-right" class="icon-btn mobile-only" title="Üyeler">👥</button>
                 </div>
+            </header>
+
+            <!-- AKTİF HAZIR KONTROLÜ (READY-CHECK) KOMPAKT ŞERİDİ -->
+            <section id="ready-check-banner" class="floating-strip" style="display:none;">
+                <div class="rc-head">
+                    <div class="rc-title-wrap">
+                        <span class="rc-dot"></span>
+                        <strong id="rc-title">Maça hazır mısınız?</strong>
+                        <span id="rc-meta" class="muted-inline"></span>
+                    </div>
+                    <div class="rc-actions">
+                        <button class="btn xs success" data-rc-status="ready">Hazırım</button>
+                        <button class="btn xs warning" data-rc-status="wait5">5 dk bekle</button>
+                        <button class="btn xs danger" data-rc-status="no">Gelmiyorum</button>
+                        <button id="btn-rc-close" class="icon-mini" title="Kapat">✕</button>
+                    </div>
+                </div>
+                <div id="rc-chips" class="rc-chips"></div>
+            </section>
+
+            <!-- CANLI KAMERA VE EKRAN PAYLAŞIMI SAHNESİ -->
+            <section id="media-stage">
+                <div class="stage-toolbar">
+                    <span id="stage-count-lbl">Canlı Sahne</span>
+                    <div class="btn-row tight">
+                        <button id="btn-exit-spotlight" class="btn xs secondary" style="display:none;">Izgaraya
+                            Dön</button>
+                        <button id="btn-expand-stage" class="btn xs secondary">Genişlet</button>
+                    </div>
+                </div>
+                <div id="stage-tiles"></div>
+            </section>
+
+            <!-- ORTAK İZLEME (WATCH TOGETHER - YOUTUBE) SAHNESİ -->
+            <section id="watch-stage" class="collab-stage" style="display:none;">
+                <div class="collab-hdr">
+                    <div class="collab-title">
+                        <span>📺</span>
+                        <strong id="watch-title-lbl">Ortak İzleme</strong>
+                        <span id="watch-host-lbl" class="muted-inline"></span>
+                    </div>
+                    <div class="btn-row tight">
+                        <button id="btn-watch-play" class="btn xs secondary" title="Herkes için Oynat">▶</button>
+                        <button id="btn-watch-pause" class="btn xs secondary" title="Herkes için Duraklat">⏸</button>
+                        <button id="btn-watch-resync" class="btn xs secondary" title="Zamanı Eşitle">⟳ Eşitle</button>
+                        <button id="btn-watch-change" class="btn xs secondary">Video Değiştir</button>
+                        <button id="btn-watch-stop" class="btn xs danger">Kapat</button>
+                    </div>
+                </div>
+                <div class="watch-body">
+                    <div id="yt-player-host"></div>
+                </div>
+            </section>
+
+            <!-- ORTAK TAKTİK ÇİZİM TAHTASI -->
+            <section id="board-stage" class="collab-stage" style="display:none;">
+                <div class="collab-hdr">
+                    <div class="collab-title">
+                        <span>✏️</span>
+                        <strong>Taktik Çizim Tahtası</strong>
+                    </div>
+                    <div class="board-tools">
+                        <button class="tool-chip active" data-btool="pen" title="Kalem">✏️</button>
+                        <button class="tool-chip" data-btool="line" title="Çizgi">╱</button>
+                        <button class="tool-chip" data-btool="arrow" title="Ok">➔</button>
+                        <button class="tool-chip" data-btool="eraser" title="Silgi">🧹</button>
+                        <input id="board-color" type="color" value="#f0b232" class="color-dot" title="Renk" />
+                        <input id="board-width" type="range" min="2" max="12" value="3" class="mini-range"
+                            title="Kalınlık" />
+                        <button id="btn-board-undo" class="btn xs secondary" title="Geri Al">↩</button>
+                        <button id="btn-board-clear" class="btn xs secondary" title="Temizle">Temizle</button>
+                        <button id="btn-board-close" class="btn xs danger" title="Gizle">Kapat</button>
+                    </div>
+                </div>
+                <div class="board-canvas-wrap">
+                    <canvas id="tactic-canvas"></canvas>
+                </div>
+            </section>
+
+            <!-- MESAJ AKIŞI -->
+            <div id="messages"></div>
+
+            <!-- MOBİL HIZLI SES/KAMERA ÇUBUĞU -->
+            <div id="mobile-voice-bar">
+                <button id="m-btn-mute" class="v-act-btn">🎙️</button>
+                <button id="m-btn-deafen" class="v-act-btn">🎧</button>
+                <button id="m-btn-cam" class="v-act-btn">📹</button>
+                <button id="m-btn-flip" class="v-act-btn" style="display:none;">🔄</button>
+                <button id="m-btn-leave" class="btn xs danger">Ayrıl</button>
             </div>
-            <div id="stage-tiles"></div>
-        </section>
 
-        <div id="messages"></div>
+            <!-- YANIT & YAZIYOR ŞERİDİ -->
+            <div id="reply-banner">
+                <span id="reply-text"></span>
+                <button id="btn-cancel-reply" class="icon-mini">✕</button>
+            </div>
+            <div id="typing-bar"></div>
 
-        <!-- MOBİL HIZLI SES/KAMERA ÇUBUĞU -->
-        <div id="mobile-voice-bar">
-            <button id="m-btn-mute" class="secondary">🎙️</button>
-            <button id="m-btn-deafen" class="secondary">🎧</button>
-            <button id="m-btn-cam" class="secondary">📹</button>
-            <button id="m-btn-flip" class="secondary" style="display:none;">🔄</button>
-            <button id="m-btn-leave" class="danger">📞 Ayrıl</button>
+            <!-- MESAJ GÖNDERME FORMU -->
+            <form id="chat-form">
+                <input type="file" id="img-input" accept="image/*" style="display:none;" />
+                <button type="button" id="btn-img" class="icon-btn" title="Görsel Gönder">📷</button>
+                <input id="chat-input" placeholder="Mesaj yaz, @etiketle veya görsel yapıştır..." autocomplete="off" />
+                <button type="submit" class="btn primary sm-pad">Gönder</button>
+            </form>
+        </main>
+
+        <!-- SAĞ PANEL (ÜYELER & ROL HİYERARŞİSİ) -->
+        <aside id="rightbar">
+            <header class="right-hdr">
+                <span>ÜYELER <small id="online-count" class="count-pill">0</small></span>
+                <button id="btn-mobile-right-close" class="icon-mini mobile-only">✕</button>
+            </header>
+            <ul id="user-list"></ul>
+        </aside>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- ÖZEL BAĞLAM MENÜSÜ (KANAL & ÜYE SAĞ TIK MENÜSÜ)                     -->
+    <!-- =================================================================== -->
+    <div id="context-menu" class="context-menu" role="menu"></div>
+
+    <!-- =================================================================== -->
+    <!-- SOUNDBOARD MİNİ PANELİ                                              -->
+    <!-- =================================================================== -->
+    <div id="soundboard-modal" class="overlay">
+        <div class="modal-box compact">
+            <div class="modal-hdr">
+                <span>🔊 Ekip Soundboard</span>
+                <button class="icon-mini" data-close="soundboard-modal">✕</button>
+            </div>
+            <p class="muted-note">Aktif ses kanalındaki herkese anında gider. Sesi ayarlamak için kaydırıcıyı kullan.
+            </p>
+            <div class="row-between">
+                <label class="field-lbl">Efekt Sesi: <span id="sb-vol-val">75%</span></label>
+                <input id="sb-vol-slider" type="range" min="0" max="100" value="75" class="mid-range" />
+            </div>
+            <div id="soundboard-grid" class="sb-grid"></div>
         </div>
+    </div>
 
-        <div id="reply-banner">
-            <span id="reply-text"></span>
-            <button id="btn-cancel-reply" class="secondary mini">İptal</button>
+    <!-- =================================================================== -->
+    <!-- SUNUCU OLUŞTUR / DAVETLE KATIL MODALI                               -->
+    <!-- =================================================================== -->
+    <div id="server-add-modal" class="overlay">
+        <div class="modal-box compact">
+            <div class="modal-hdr">
+                <span>Sunucu Ekle</span>
+                <button class="icon-mini" data-close="server-add-modal">✕</button>
+            </div>
+            <div class="tab-bar">
+                <button class="tab-btn active" data-mtab="srv-tab-join">Davet Koduyla Katıl</button>
+                <button class="tab-btn" data-mtab="srv-tab-create">Yeni Sunucu Kur</button>
+            </div>
+            <div id="srv-tab-join" class="tab-pane active">
+                <label class="field-lbl">Sunucu Davet Kodu</label>
+                <input id="join-server-code" placeholder="Örn: BD-7X9K2M" autocomplete="off" />
+                <button id="btn-confirm-join-server" class="btn primary">Sunucuya Katıl</button>
+                <small id="join-server-err" class="error-text"></small>
+            </div>
+            <div id="srv-tab-create" class="tab-pane">
+                <label class="field-lbl">Sunucu Adı</label>
+                <input id="create-server-name" placeholder="Örn: CS2 Takımı, Gece Ekibi..." maxlength="32" />
+                <button id="btn-confirm-create-server" class="btn success">Sunucu Oluştur</button>
+                <small id="create-server-err" class="error-text"></small>
+            </div>
         </div>
-        <div id="typing-bar"></div>
+    </div>
 
-        <form id="chat-form">
-            <input type="file" id="img-input" accept="image/*" style="display:none;" />
-            <button type="button" id="btn-img" class="secondary" title="Resim Gönder">📷</button>
-            <input id="chat-input" placeholder="Mesaj yaz, @etiketle veya resim yapıştır..." autocomplete="off" />
-            <button type="submit">Gönder</button>
-        </form>
-    </main>
-
-    <!-- SAĞ PANEL (KULLANICILAR) -->
-    <aside id="rightbar">
-        <div class="section-hdr" style="display:flex; justify-content:space-between; align-items:center;">
-            <span>Çevrimiçi (<span id="online-count">0</span>/10)</span>
-            <button class="secondary mini mobile-only" onclick="closeDrawers()">✕</button>
+    <!-- =================================================================== -->
+    <!-- KANAL OLUŞTUR / DÜZENLE MODALI                                      -->
+    <!-- =================================================================== -->
+    <div id="channel-modal" class="overlay">
+        <div class="modal-box compact">
+            <div class="modal-hdr">
+                <span id="ch-modal-title">Kanalı Düzenle</span>
+                <button class="icon-mini" data-close="channel-modal">✕</button>
+            </div>
+            <input type="hidden" id="ch-modal-id" />
+            <label class="field-lbl">Kanal Adı</label>
+            <input id="ch-modal-name" placeholder="kanal-adi" maxlength="28" />
+            <div id="ch-modal-type-wrap">
+                <label class="field-lbl">Kanal Türü</label>
+                <select id="ch-modal-type">
+                    <option value="text">Metin Kanalı</option>
+                    <option value="voice">Ses & Kamera Kanalı</option>
+                </select>
+            </div>
+            <label class="field-lbl">Konu / Açıklama</label>
+            <input id="ch-modal-topic" placeholder="İsteğe bağlı açıklama" maxlength="100" />
+            <label id="ch-modal-afk-wrap" class="check-row" style="display:none;">
+                <input id="ch-modal-afk" type="checkbox" />
+                <span>Bu ses kanalını sunucunun AFK odası yap</span>
+            </label>
+            <div class="btn-row">
+                <button id="btn-save-channel" class="btn primary">Kaydet</button>
+                <button class="btn secondary" data-close="channel-modal">İptal</button>
+            </div>
+            <small id="ch-modal-err" class="error-text"></small>
         </div>
-        <ul id="user-list"></ul>
-    </aside>
+    </div>
 
-    <!-- BAĞLANTI & SİSTEM SAĞLIĞI MODALI -->
+    <!-- =================================================================== -->
+    <!-- ÜYE ROLLERİNİ DÜZENLE MODALI                                        -->
+    <!-- =================================================================== -->
+    <div id="member-roles-modal" class="overlay">
+        <div class="modal-box compact">
+            <div class="modal-hdr">
+                <span id="mr-title">Üye Rolleri</span>
+                <button class="icon-mini" data-close="member-roles-modal">✕</button>
+            </div>
+            <p class="muted-note">Yalnızca kendi yetki önceliğinizin altındaki rolleri atayabilir veya
+                kaldırabilirsiniz.</p>
+            <div id="mr-roles-list" class="role-check-list"></div>
+            <div class="btn-row">
+                <button id="btn-save-member-roles" class="btn primary">Rolleri Güncelle</button>
+                <button class="btn secondary" data-close="member-roles-modal">İptal</button>
+            </div>
+            <small id="mr-err" class="error-text"></small>
+        </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- HIZLI ANKET MODALI                                                  -->
+    <!-- =================================================================== -->
+    <div id="poll-modal" class="overlay">
+        <div class="modal-box">
+            <div class="modal-hdr">
+                <span>📊 Hızlı Anketler</span>
+                <button class="icon-mini" data-close="poll-modal">✕</button>
+            </div>
+            <div class="card-block">
+                <label class="field-lbl">Yeni Anket Başlat</label>
+                <input id="poll-question" placeholder="Örn: Bu akşam ne oynayalım?" maxlength="100" />
+                <div id="poll-options-inputs" class="field-group">
+                    <input class="poll-opt-inp" placeholder="Seçenek 1 (ör: CS2)" maxlength="48" />
+                    <input class="poll-opt-inp" placeholder="Seçenek 2 (ör: Valorant)" maxlength="48" />
+                    <input class="poll-opt-inp" placeholder="Seçenek 3 (isteğe bağlı)" maxlength="48" />
+                    <input class="poll-opt-inp" placeholder="Seçenek 4 (isteğe bağlı)" maxlength="48" />
+                </div>
+                <button id="btn-create-poll" class="btn primary">Anketi Yayınla</button>
+                <small id="poll-err" class="error-text"></small>
+            </div>
+            <div id="polls-list" class="polls-list"></div>
+        </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- ORTAK İZLEME (YOUTUBE LİNKİ) MODALI                                 -->
+    <!-- =================================================================== -->
+    <div id="watch-modal" class="overlay">
+        <div class="modal-box compact">
+            <div class="modal-hdr">
+                <span>📺 Ortak İzleme (YouTube)</span>
+                <button class="icon-mini" data-close="watch-modal">✕</button>
+            </div>
+            <label class="field-lbl">YouTube Video Linki veya ID</label>
+            <input id="watch-url-input" placeholder="https://www.youtube.com/watch?v=..." />
+            <label class="field-lbl">Başlık (İsteğe bağlı)</label>
+            <input id="watch-title-input" placeholder="Örn: Turnuva Özeti" maxlength="80" />
+            <div class="btn-row">
+                <button id="btn-start-watch" class="btn primary">Birlikte İzle</button>
+                <button class="btn secondary" data-close="watch-modal">İptal</button>
+            </div>
+            <small id="watch-err" class="error-text"></small>
+        </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- 1-1 FISILTI (DM) MODALI                                             -->
+    <!-- =================================================================== -->
+    <div id="dm-modal" class="overlay">
+        <div class="modal-box wide dm-box">
+            <div class="modal-hdr">
+                <span>💬 1-1 Fısıltılar (Özel Mesaj)</span>
+                <button class="icon-mini" data-close="dm-modal">✕</button>
+            </div>
+            <div class="dm-layout">
+                <aside class="dm-sidebar">
+                    <div class="dm-sub-hdr">Sohbetler</div>
+                    <ul id="dm-conv-list" class="dm-conv-list"></ul>
+                </aside>
+                <section class="dm-chat-pane">
+                    <div id="dm-peer-hdr" class="dm-peer-hdr">Soldan bir kişi seç veya üye listesinden fısıltı başlat.
+                    </div>
+                    <div id="dm-messages" class="dm-messages"></div>
+                    <form id="dm-form" class="dm-form">
+                        <input id="dm-input" placeholder="Özel mesaj yaz..." autocomplete="off" disabled />
+                        <button type="submit" class="btn primary sm-pad" id="dm-send-btn" disabled>Gönder</button>
+                    </form>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <!-- =================================================================== -->
+    <!-- BAĞLANTI & SİSTEM SAĞLIĞI MODALI                                    -->
+    <!-- =================================================================== -->
     <div id="health-modal" class="overlay">
         <div class="modal-box wide">
             <div class="modal-hdr">
-                <span>🩺 Bağlantı ve Sistem Sağlığı</span>
-                <button class="secondary mini" onclick="closeModal('health-modal')">Kapat</button>
+                <span>🩺 Bağlantı & Sistem Sağlığı</span>
+                <button class="icon-mini" data-close="health-modal">✕</button>
             </div>
-
             <div class="health-grid">
                 <div class="stat-card"><span class="stat-lbl">Sunucu Ping</span><span id="h-ping" class="stat-val">--
                         ms</span></div>
-                <div class="stat-card"><span class="stat-lbl">Sunucu Uptime</span><span id="h-uptime"
+                <div class="stat-card"><span class="stat-lbl">Uptime</span><span id="h-uptime"
                         class="stat-val">--</span></div>
                 <div class="stat-card"><span class="stat-lbl">Sunucu RAM</span><span id="h-ram" class="stat-val">--
                         MB</span></div>
                 <div class="stat-card"><span class="stat-lbl">Ses Motoru</span><span id="h-audio"
                         class="stat-val">--</span></div>
             </div>
-
-            <div class="stat-card" style="gap:4px;">
+            <div class="stat-card">
                 <span class="stat-lbl">Aktif Cihaz & Medya Özeti</span>
-                <div id="h-local-summary" style="font-size:12px; color:var(--text-main);">Ses kanalında değilsin.</div>
+                <div id="h-local-summary" class="muted-note">Ses kanalında değilsin.</div>
             </div>
-
-            <div style="overflow-x:auto;">
+            <div class="table-scroll">
                 <table class="health-table">
                     <thead>
                         <tr>
@@ -1350,56 +544,56 @@
                     </thead>
                     <tbody id="h-peers-body">
                         <tr>
-                            <td colspan="7" style="color:var(--text-muted); text-align:center;">Aktif P2P bağlantısı
-                                yok.</td>
+                            <td colspan="7" class="center muted-note">Aktif P2P bağlantısı yok.</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
-            <small style="color:var(--text-muted);">* P2P doğrudan bağlantı kurulamayan (TURN gereken) veya
-                ses/görüntüsü donan bir arkadaş için "Yenile" ile ICE yeniden başlatılabilir.</small>
+            <small class="muted-note">* P2P donan veya TURN gerektiren bir bağlantı için "Yenile" ile ICE yeniden
+                başlatılabilir.</small>
         </div>
     </div>
 
-    <!-- AYARLAR, SES DSP, KAMERA & ADMİN MODALI -->
+    <!-- =================================================================== -->
+    <!-- AYARLAR, DSP, OVERLAY, SUNUCU & ROLLER MODALI                       -->
+    <!-- =================================================================== -->
     <div id="settings-modal" class="overlay">
-        <div class="modal-box wide">
+        <div class="modal-box xwide">
             <div class="modal-hdr">
-                <span>⚙️ Ses DSP, Kamera, Oyun ve Ayarlar</span>
-                <button class="secondary mini" onclick="closeModal('settings-modal')">Kapat</button>
-            </div>
-            <div class="tab-bar">
-                <button class="tab-btn active" data-tab="tab-audio">🎙️ Ses & Kamera</button>
-                <button class="tab-btn" data-tab="tab-theme">🎮 Oyun & Tema</button>
-                <button class="tab-btn" data-tab="tab-admin" id="tab-admin-btn" style="display:none;">👑 Admin &
-                    DB</button>
+                <span>⚙️ Ayarlar</span>
+                <button class="icon-mini" data-close="settings-modal">✕</button>
             </div>
 
-            <!-- SES & KAMERA SEKME -->
+            <div class="tab-bar">
+                <button class="tab-btn active" data-tab="tab-audio">🎙️ Ses & Kamera</button>
+                <button class="tab-btn" data-tab="tab-overlay">🎮 Oyun, Overlay & Profil</button>
+                <button class="tab-btn" data-tab="tab-server" id="tab-server-btn" style="display:none;">🛡️ Sunucu &
+                    Roller</button>
+                <button class="tab-btn" data-tab="tab-db" id="tab-db-btn" style="display:none;">💾 Veritabanı</button>
+            </div>
+
+            <!-- 1. SES & KAMERA -->
             <div id="tab-audio" class="tab-pane active">
-                <div class="row" style="flex-wrap:wrap;">
-                    <div style="flex:1; min-width:180px; display:flex; flex-direction:column; gap:5px;">
+                <div class="grid-2">
+                    <div class="field-col">
                         <label class="field-lbl">Mikrofon</label>
                         <select id="mic-select">
                             <option value="">Varsayılan Mikrofon</option>
                         </select>
                     </div>
-                    <div style="flex:1; min-width:180px; display:flex; flex-direction:column; gap:5px;">
+                    <div class="field-col">
                         <label class="field-lbl">Hoparlör / Kulaklık</label>
                         <select id="spk-select">
                             <option value="">Varsayılan Çıkış</option>
                         </select>
                     </div>
-                </div>
-
-                <div class="row" style="flex-wrap:wrap;">
-                    <div style="flex:1; min-width:180px; display:flex; flex-direction:column; gap:5px;">
+                    <div class="field-col">
                         <label class="field-lbl">Kamera Aygıtı</label>
                         <select id="cam-select">
                             <option value="">Varsayılan Kamera</option>
                         </select>
                     </div>
-                    <div style="flex:1; min-width:180px; display:flex; flex-direction:column; gap:5px;">
+                    <div class="field-col">
                         <label class="field-lbl">Kamera Kalitesi (10 kişi upload dostu)</label>
                         <select id="cam-quality">
                             <option value="360">360p — 15 FPS (Oyun / Mobil Dostu)</option>
@@ -1409,137 +603,282 @@
                     </div>
                 </div>
 
-                <label class="field-lbl">Giriş Hassasiyeti / Noise Gate: <span id="gate-val">22%</span></label>
-                <div class="mic-meter-bg" style="height:12px;">
-                    <div id="modal-mic-meter" class="mic-meter-fill"></div>
-                    <div id="modal-gate-line" class="gate-marker" style="left:22%;"></div>
+                <div class="card-block">
+                    <div class="row-between">
+                        <label class="field-lbl">Noise Gate (Giriş Eşiği): <strong id="gate-val">22%</strong></label>
+                        <span class="muted-inline">Global: <b>Alt+M</b> / <b>Alt+D</b> / <b>Alt+O</b></span>
+                    </div>
+                    <div class="mic-meter-bg tall">
+                        <div id="modal-mic-meter" class="mic-meter-fill"></div>
+                        <div id="modal-gate-line" class="gate-marker" style="left:22%;"></div>
+                    </div>
+                    <input id="gate-slider" type="range" min="0" max="75" step="1" value="22" />
+
+                    <label class="field-lbl">Mikrofon Kazancı (Gain): <strong id="mic-gain-val">100%</strong></label>
+                    <input id="mic-gain" type="range" min="0" max="2" step="0.05" value="1" />
                 </div>
-                <input id="gate-slider" type="range" min="0" max="75" step="1" value="22" />
 
-                <label class="field-lbl">Mikrofon Kazancı (Gain): <span id="mic-gain-val">100%</span></label>
-                <input id="mic-gain" type="range" min="0" max="2" step="0.05" value="1" />
-
-                <label class="field-lbl">Ses İşleme (DSP) & Kamera Seçenekleri</label>
                 <div class="dsp-grid">
-                    <label class="row" style="cursor:pointer; font-size:12px;"><input id="chk-ns" type="checkbox"
-                            checked /> Gürültü Engelleme (NS)</label>
-                    <label class="row" style="cursor:pointer; font-size:12px;"><input id="chk-aec" type="checkbox"
-                            checked /> Yankı İptali (AEC)</label>
-                    <label class="row" style="cursor:pointer; font-size:12px;"><input id="chk-agc" type="checkbox"
-                            checked /> Otomatik Kazanç (AGC)</label>
-                    <label class="row" style="cursor:pointer; font-size:12px;"><input id="chk-hpf" type="checkbox"
-                            checked /> Fan/Dip Ses Filtresi (85Hz)</label>
-                    <label class="row" style="cursor:pointer; font-size:12px;"><input id="chk-comp" type="checkbox"
-                            checked /> Ses Patlama Engelleyici</label>
-                    <label class="row" style="cursor:pointer; font-size:12px;"><input id="chk-mirror" type="checkbox"
-                            checked /> Kendi Kameramı Aynala</label>
+                    <label class="check-row"><input id="chk-ns" type="checkbox" checked /><span>Gürültü Engelleme
+                            (NS)</span></label>
+                    <label class="check-row"><input id="chk-aec" type="checkbox" checked /><span>Yankı İptali
+                            (AEC)</span></label>
+                    <label class="check-row"><input id="chk-agc" type="checkbox" checked /><span>Otomatik Kazanç
+                            (AGC)</span></label>
+                    <label class="check-row"><input id="chk-hpf" type="checkbox" checked /><span>Fan/Dip Ses Filtresi
+                            (85Hz)</span></label>
+                    <label class="check-row"><input id="chk-comp" type="checkbox" checked /><span>Ses Patlama
+                            Engelleyici</span></label>
+                    <label class="check-row"><input id="chk-mirror" type="checkbox" checked /><span>Kendi Kameramı
+                            Aynala</span></label>
                 </div>
 
-                <div class="row" style="flex-wrap:wrap;">
-                    <label class="row" style="cursor:pointer; font-size:12px;"><input id="chk-ptt" type="checkbox" />
-                        Bas-Konuş</label>
-                    <button id="btn-ptt-key" class="secondary mini" style="flex:0 0 100px;">KeyV</button>
-                    <span style="font-size:11px; color:var(--text-muted); margin-left:auto;">Global: <b>Alt+M</b> /
-                        <b>Alt+D</b></span>
-                </div>
-            </div>
-
-            <!-- OYUN PERFORMANSI, TEMA & PROFİL -->
-            <div id="tab-theme" class="tab-pane">
-                <div id="gpu-setting-wrap">
-                    <label class="row" style="cursor:pointer;">
-                        <input id="chk-disable-gpu" type="checkbox" checked /> GPU Donanım Hızlandırmayı Kapat (Oyun FPS
-                        Koruması — Yeniden başlatır)
+                <div class="row-between wrap">
+                    <label class="check-row">
+                        <input id="chk-ptt" type="checkbox" />
+                        <span>Bas-Konuş (PTT)</span>
                     </label>
-                    <small style="color:var(--text-muted);">Açıkken Electron ekran kartını oyuna bırakır.</small>
-                    <hr style="border:0; border-top:1px solid var(--bg-active); margin-top:8px;" />
-                </div>
-
-                <label class="field-lbl">Tema Seçimi</label>
-                <select id="theme-select">
-                    <option value="dark">Discord Koyu (Varsayılan)</option>
-                    <option value="amoled">AMOLED Gece (Saf Siyah)</option>
-                    <option value="cyber">Cyber Neon</option>
-                    <option value="forest">Orman (Emerald)</option>
-                    <option value="light">Açık Tema</option>
-                </select>
-
-                <div class="row">
-                    <div style="flex:1; display:flex; flex-direction:column; gap:5px;">
-                        <label class="field-lbl">Vurgu Rengi</label>
-                        <input id="accent-picker" type="color" value="#5865f2"
-                            style="width:100%; height:36px; padding:2px;" />
-                    </div>
-                    <div style="flex:1; display:flex; flex-direction:column; gap:5px;">
-                        <label class="field-lbl">Yazı Boyutu</label>
-                        <select id="font-size-select">
-                            <option value="12.5px">Kompakt</option>
-                            <option value="14px" selected>Normal</option>
-                            <option value="16px">Büyük</option>
-                        </select>
-                    </div>
-                </div>
-
-                <hr style="border:0; border-top:1px solid var(--bg-active);" />
-                <label class="field-lbl">Profil Rengin & Durum Yazın</label>
-                <div class="row">
-                    <input id="prof-color" type="color" value="#5865f2" style="width:48px; height:36px; padding:2px;" />
-                    <input id="prof-status" placeholder="Durumun (ör: CS2, Müsait...)" style="flex:1;" />
-                    <button id="btn-save-profile" class="success" style="flex:0;">Kaydet</button>
+                    <button id="btn-ptt-key" class="btn xs secondary">KeyV</button>
                 </div>
             </div>
 
-            <!-- ADMİN & DB -->
-            <div id="tab-admin" class="tab-pane">
-                <label class="field-lbl">Yeni Kanal Oluştur</label>
-                <div class="row">
-                    <input id="new-ch-name" placeholder="Kanal adı" style="flex:1;" />
-                    <select id="new-ch-type">
-                        <option value="text">Metin</option>
-                        <option value="voice">Ses / Kamera</option>
-                    </select>
-                </div>
-                <div class="row">
-                    <input id="new-ch-topic" placeholder="Kanal açıklaması (isteğe bağlı)" style="flex:1;" />
-                    <button id="btn-add-ch" class="success" style="flex:0 0 100px;">Oluştur</button>
+            <!-- 2. OYUN, OVERLAY, TEMA & PROFİL -->
+            <div id="tab-overlay" class="tab-pane">
+                <!-- ELECTRON OVERLAY & GPU AYARLARI -->
+                <div id="electron-overlay-card" class="card-block" style="display:none;">
+                    <div class="row-between">
+                        <label class="check-row">
+                            <input id="chk-overlay-enabled" type="checkbox" />
+                            <span><strong>Oyun İçi Saydam Overlay</strong> (Kısayol: Alt+O)</span>
+                        </label>
+                    </div>
+                    <div class="grid-2">
+                        <div class="field-col">
+                            <label class="field-lbl">Ekran Konumu</label>
+                            <select id="overlay-pos-select">
+                                <option value="top-left">Sol Üst</option>
+                                <option value="top-right">Sağ Üst</option>
+                                <option value="bottom-left">Sol Alt</option>
+                                <option value="bottom-right">Sağ Alt</option>
+                            </select>
+                        </div>
+                        <div class="field-col">
+                            <label class="field-lbl">Overlay Boyutu</label>
+                            <select id="overlay-size-select">
+                                <option value="sm">Küçük (Kompakt)</option>
+                                <option value="md" selected>Orta (Önerilen)</option>
+                                <option value="lg">Büyük</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div id="overlay-restart-banner" class="info-banner warn" style="display:none;">
+                        <span>Windows'ta saydam overlay'in siyah kutu olmadan çizilmesi için uygulama GPU
+                            kompozisyonuyla yeniden başlatılmalıdır.</span>
+                        <button id="btn-overlay-restart" class="btn xs primary">Yeniden Başlat</button>
+                    </div>
+
+                    <hr class="soft-hr" />
+
+                    <label class="check-row">
+                        <input id="chk-disable-gpu" type="checkbox" checked />
+                        <span>Overlay kapalıyken GPU Donanım Hızlandırmayı kapat (Oyun FPS Koruması)</span>
+                    </label>
+                    <small class="muted-note">
+                        * Akıllı GPU Yönetimi: Overlay kapalıyken Electron ekran kartını oyuna bırakır. Overlay
+                        açıldığında yalnızca saydamlık için donanım kompozisyonu otomatik devreye girer.
+                    </small>
                 </div>
 
-                <hr style="border:0; border-top:1px solid var(--bg-active);" />
-                <label class="field-lbl">Sunucu Adı & Kayıt Davet Kodu</label>
-                <div class="row">
-                    <input id="adm-server-name" placeholder="Sunucu adı" style="flex:1;" />
-                    <input id="adm-invite-code" placeholder="Davet kodu (ör: ekip2026)" style="flex:1;" />
+                <!-- GÖRÜNÜM & AFK -->
+                <div class="card-block">
+                    <div class="grid-3">
+                        <div class="field-col">
+                            <label class="field-lbl">Tema</label>
+                            <select id="theme-select">
+                                <option value="dark">Gece Antrasit (Varsayılan)</option>
+                                <option value="amoled">AMOLED Saf Siyah</option>
+                                <option value="slate">Yumuşak Kurşun</option>
+                                <option value="forest">Orman Koyu</option>
+                                <option value="light">Açık Tema</option>
+                            </select>
+                        </div>
+                        <div class="field-col">
+                            <label class="field-lbl">Vurgu Rengi</label>
+                            <input id="accent-picker" type="color" value="#5865f2" class="color-full" />
+                        </div>
+                        <div class="field-col">
+                            <label class="field-lbl">Yazı Boyutu</label>
+                            <select id="font-size-select">
+                                <option value="13px">Kompakt</option>
+                                <option value="14px" selected>Normal</option>
+                                <option value="15.5px">Büyük</option>
+                            </select>
+                        </div>
+                    </div>
+                    <label class="check-row">
+                        <input id="chk-afk-exempt" type="checkbox" />
+                        <span>Ses kanalında sessiz kaldığımda beni otomatik AFK odasına taşıma</span>
+                    </label>
                 </div>
 
-                <label class="field-lbl">Yedek TURN Sunucusu (Katı CGNAT / Mobil İçin)</label>
-                <input id="adm-turn-url" placeholder="turn:a.relay.metered.ca:80" />
-                <div class="row">
-                    <input id="adm-turn-user" placeholder="TURN Kullanıcı Adı" style="flex:1;" />
-                    <input id="adm-turn-pass" placeholder="TURN Şifre" style="flex:1;" />
+                <!-- PROFİL -->
+                <div class="card-block">
+                    <label class="field-lbl">Profilin (Görünür Ad, Avatar, Renk & Durum)</label>
+                    <div class="profile-edit-row">
+                        <div class="avatar-upload-wrap">
+                            <div id="prof-avatar-preview" class="avatar-circle lg">?</div>
+                            <input type="file" id="prof-avatar-file" accept="image/*" style="display:none;" />
+                            <div class="btn-row tight">
+                                <button type="button" id="btn-pick-avatar" class="btn xs secondary">Fotoğraf</button>
+                                <button type="button" id="btn-clear-avatar" class="btn xs secondary">Kaldır</button>
+                            </div>
+                        </div>
+                        <div class="profile-fields">
+                            <div class="btn-row">
+                                <input id="prof-display-name" placeholder="Görünür ad" maxlength="28" />
+                                <input id="prof-color" type="color" value="#5865f2" class="color-box"
+                                    title="İsim/Avatar Rengi" />
+                            </div>
+                            <div class="btn-row">
+                                <input id="prof-status" placeholder="Durumun (ör: CS2, Müsait...)" maxlength="40" />
+                                <button id="btn-save-profile" class="btn primary">Kaydet</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <button id="btn-save-server-settings" class="success">Sunucu Ayarlarını Kaydet</button>
+            </div>
 
-                <hr style="border:0; border-top:1px solid var(--bg-active);" />
-                <label class="field-lbl">Yerel PC Veritabanı (Master Yedek)</label>
-                <div id="db-info" class="db-box">Tarayıcı modunda JSON indir/yükle butonlarını kullanabilirsin.</div>
-                <div class="row" style="flex-wrap:wrap;">
-                    <button id="btn-restore-pc-db" class="secondary">PC DB'yi Yükle</button>
-                    <button id="btn-export-db" class="secondary">JSON İndir</button>
-                    <button id="btn-import-db" class="secondary">JSON Yükle</button>
-                    <input type="file" id="db-file-input" accept=".json" style="display:none;" />
+            <!-- 3. SUNUCU AYARLARI & ÖZEL ROL HİYERARŞİSİ -->
+            <div id="tab-server" class="tab-pane">
+                <div id="srv-general-section" class="card-block">
+                    <label class="field-lbl">Sunucu Bilgileri & Davet Kodu</label>
+                    <div class="grid-2">
+                        <input id="adm-server-name" placeholder="Sunucu adı" maxlength="32" />
+                        <div class="btn-row tight">
+                            <input id="adm-invite-code" placeholder="Davet kodu" maxlength="24" />
+                            <button id="btn-copy-invite" class="btn xs secondary" title="Kopyala">Kopyala</button>
+                            <button id="btn-regen-invite" class="btn xs secondary" title="Yeni Kod Üret">↻</button>
+                        </div>
+                    </div>
+
+                    <div class="grid-2">
+                        <div class="field-col">
+                            <label class="field-lbl">AFK Ses Kanalı</label>
+                            <select id="adm-afk-channel">
+                                <option value="">Devre Dışı</option>
+                            </select>
+                        </div>
+                        <div class="field-col">
+                            <label class="field-lbl">AFK Süresi</label>
+                            <select id="adm-afk-timeout">
+                                <option value="0">Kapalı</option>
+                                <option value="180">3 Dakika</option>
+                                <option value="300" selected>5 Dakika</option>
+                                <option value="600">10 Dakika</option>
+                                <option value="900">15 Dakika</option>
+                                <option value="1800">30 Dakika</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <label class="field-lbl">Bu Sunucuya Özel TURN Sunucusu (CGNAT / Mobil)</label>
+                    <input id="adm-turn-url" placeholder="turn:a.relay.metered.ca:80" />
+                    <div class="grid-2">
+                        <input id="adm-turn-user" placeholder="TURN Kullanıcı Adı" />
+                        <input id="adm-turn-pass" placeholder="TURN Şifre" />
+                    </div>
+                    <div class="row-between wrap">
+                        <button id="btn-save-server-settings" class="btn primary">Sunucu Ayarlarını Kaydet</button>
+                        <div class="btn-row tight">
+                            <button id="btn-leave-server" class="btn xs secondary" style="display:none;">Sunucudan
+                                Ayrıl</button>
+                            <button id="btn-delete-server" class="btn xs danger" style="display:none;">Sunucuyu
+                                Sil</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ÖZEL ROL & YETKİ YÖNETİCİSİ -->
+                <div id="srv-roles-section" class="card-block">
+                    <div class="row-between">
+                        <label class="field-lbl">Özel Roller & Hiyerarşi (Yüksek Öncelik Puanı Üsttedir)</label>
+                        <button id="btn-new-role" class="btn xs primary">+ Yeni Rol</button>
+                    </div>
+                    <div class="roles-manager">
+                        <ul id="roles-list" class="roles-list"></ul>
+                        <div id="role-editor" class="role-editor">
+                            <input type="hidden" id="edit-role-id" />
+                            <div class="grid-3">
+                                <div class="field-col">
+                                    <label class="field-lbl">Rol Adı</label>
+                                    <input id="edit-role-name" placeholder="Örn: Kaptan" maxlength="28" />
+                                </div>
+                                <div class="field-col">
+                                    <label class="field-lbl">Renk</label>
+                                    <input id="edit-role-color" type="color" value="#5865f2" class="color-full" />
+                                </div>
+                                <div class="field-col">
+                                    <label class="field-lbl">Öncelik Puanı (1-999)</label>
+                                    <input id="edit-role-priority" type="number" min="1" max="999" value="30" />
+                                </div>
+                            </div>
+                            <div class="dsp-grid">
+                                <label class="check-row"><input type="checkbox" class="role-perm-chk"
+                                        data-perm="administrator" /><span>Yönetici (Tam Yetki)</span></label>
+                                <label class="check-row"><input type="checkbox" class="role-perm-chk"
+                                        data-perm="manageChannels" /><span>Kanal Yönetimi</span></label>
+                                <label class="check-row"><input type="checkbox" class="role-perm-chk"
+                                        data-perm="manageRoles" /><span>Rol Yönetimi</span></label>
+                                <label class="check-row"><input type="checkbox" class="role-perm-chk"
+                                        data-perm="kickMembers" /><span>Üye Atma</span></label>
+                                <label class="check-row"><input type="checkbox" class="role-perm-chk"
+                                        data-perm="muteMembers" /><span>Susturma & AFK Taşı</span></label>
+                                <label class="check-row"><input type="checkbox" class="role-perm-chk"
+                                        data-perm="pinMessages" /><span>Mesaj Sabitleme</span></label>
+                                <label class="check-row"><input type="checkbox" class="role-perm-chk"
+                                        data-perm="deleteMessages" /><span>Mesaj Silme</span></label>
+                                <label class="check-row"><input type="checkbox" class="role-perm-chk"
+                                        data-perm="manageServer" /><span>Sunucu Ayarları</span></label>
+                            </div>
+                            <div class="row-between">
+                                <button id="btn-save-role" class="btn primary sm-pad">Rolü Kaydet</button>
+                                <button id="btn-delete-role" class="btn danger sm-pad" style="display:none;">Rolü
+                                    Sil</button>
+                            </div>
+                            <small id="role-editor-err" class="error-text"></small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. YEREL MASTER VERİTABANI (GENEL YÖNETİCİ) -->
+            <div id="tab-db" class="tab-pane">
+                <div class="card-block">
+                    <label class="field-lbl">Yerel PC Master Veritabanı & v4.0 → v5.0 Yedek Geri Yükleme</label>
+                    <div id="db-info" class="db-box">Tarayıcı modunda JSON indir/yükle butonlarını kullanabilirsin.
+                    </div>
+                    <div class="btn-row wrap">
+                        <button id="btn-restore-pc-db" class="btn secondary">PC DB'yi Sunucuya Yükle</button>
+                        <button id="btn-export-db" class="btn secondary">JSON İndir</button>
+                        <button id="btn-import-db" class="btn secondary">JSON Yükle (v4/v5)</button>
+                        <input type="file" id="db-file-input" accept=".json" style="display:none;" />
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- EKRAN / PENCERE SEÇİCİ MODALI (Electron) -->
+    <!-- =================================================================== -->
+    <!-- EKRAN / PENCERE SEÇİCİ MODALI (Electron)                            -->
+    <!-- =================================================================== -->
     <div id="screen-modal" class="overlay">
         <div class="modal-box wide">
             <div class="modal-hdr">
-                <span>🖥️ Paylaşılacak Ekran veya Pencereyi Seç</span>
-                <button class="secondary mini" onclick="closeModal('screen-modal')">İptal</button>
+                <span>🖥️ Ekran veya Pencere Seç</span>
+                <button class="icon-mini" data-close="screen-modal">✕</button>
             </div>
-            <div class="row" style="flex-wrap:wrap;">
+            <div class="btn-row wrap">
                 <select id="screen-res" style="flex:1;">
                     <option value="720" selected>720p — 1.5 Mbps (Oyun Ping Dostu)</option>
                     <option value="1080">1080p — 2.5 Mbps (Yüksek Netlik)</option>
@@ -1548,1785 +887,39 @@
                     <option value="30" selected>30 FPS (Düşük CPU)</option>
                     <option value="60">60 FPS (Akıcı)</option>
                 </select>
-                <label class="row" style="font-size:12px; white-space:nowrap; cursor:pointer;">
-                    <input id="screen-audio" type="checkbox" checked /> Bilgisayar Sesi
+                <label class="check-row">
+                    <input id="screen-audio" type="checkbox" checked />
+                    <span>Bilgisayar Sesi</span>
                 </label>
             </div>
             <div id="source-grid" class="source-grid"></div>
-            <button id="btn-start-share" class="success">Paylaşımı Başlat</button>
+            <button id="btn-start-share" class="btn success">Paylaşımı Başlat</button>
         </div>
     </div>
 
-    <!-- SABİTLENEN MESAJLAR -->
+    <!-- =================================================================== -->
+    <!-- SABİTLENEN MESAJLAR                                                 -->
+    <!-- =================================================================== -->
     <div id="pins-modal" class="overlay">
         <div class="modal-box">
             <div class="modal-hdr">
                 <span>📌 Sabitlenen Mesajlar</span>
-                <button class="secondary mini" onclick="closeModal('pins-modal')">Kapat</button>
+                <button class="icon-mini" data-close="pins-modal">✕</button>
             </div>
-            <div id="pins-list" style="display:flex; flex-direction:column; gap:8px;"></div>
+            <div id="pins-list" class="pins-list"></div>
         </div>
     </div>
 
     <!-- RESİM BÜYÜTME -->
-    <div id="lightbox" class="overlay" onclick="this.classList.remove('show')">
+    <div id="lightbox" class="overlay">
         <img id="lightbox-img" src="" alt="Önizleme" />
     </div>
 
+    <!-- GİZLİ WEBRTC SES HAVUZU -->
     <div id="hidden-audio-sink" style="display:none;"></div>
 
     <script src="/socket.io/socket.io.js"></script>
-    <script>
-        const socket = io();
-        let iceServers = [
-            { urls: "stun:stun.l.google.com:19302" },
-            { urls: "stun:stun1.l.google.com:19302" }
-        ];
-
-        let me = null;
-        let channels = [];
-        let allMessages = {};
-        let unreadCounts = {};
-        let onlineUsers = [];
-        let activeTextChannel = "genel";
-        let currentVoiceChannel = null;
-        let lastDBSnapshot = null;
-        let replyTarget = null;
-        let searchQuery = "";
-        let selectedScreenSourceId = null;
-
-        // Sahne (Kamera & Ekran) durumları
-        let spotlightTileId = null;
-        let stageExpanded = false;
-        let camStream = null;
-        let camFacingMode = "user"; // "user" (ön) | "environment" (arka - mobil)
-        let screenStream = null;
-
-        // Tercihler
-        let gameMode = localStorage.getItem("bd_gamemode") === "1";
-        let gateThreshold = parseInt(localStorage.getItem("bd_gate") ?? "22", 10);
-        let pttEnabled = localStorage.getItem("bd_ptt") === "1";
-        let pttKey = localStorage.getItem("bd_ptt_key") || "KeyV";
-        let pttHeld = false;
-        let capturingPttKey = false;
-        let lastPingMs = 0;
-
-        // Ses DSP Zinciri
-        let sharedAudioCtx = null;
-        let masterOutGain = null;
-        let rawMicStream = null;
-        let micSourceNode = null;
-        let highPassNode = null;
-        let micAnalyserNode = null;
-        let noiseGateNode = null;
-        let compressorNode = null;
-        let micGainNode = null;
-        let micDestNode = null;
-        let processedMicStream = null;
-
-        let latestMicLevelPct = 0;
-        let gateOpen = false;
-        let gateHoldUntil = 0;
-        let gateTimerId = null;
-        let uiVisualTimerId = null;
-        let healthTimerId = null;
-
-        let isMuted = false;
-        let isDeafened = false;
-        let serverMuted = false;
-
-        const peers = new Map();
-        const userVolumes = new Map();
-        const typingUsers = new Map();
-        let typingTimeout = null;
-
-        function escapeHTML(str) {
-            return String(str || "")
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;")
-                .replace(/"/g, "&quot;")
-                .replace(/'/g, "&#39;");
-        }
-
-        // --- MOBİL ÇEKMECELER & MODALLAR ---
-        function toggleDrawer(id) {
-            const target = document.getElementById(id);
-            const isOpen = target.classList.contains("drawer-open");
-            closeDrawers();
-            if (!isOpen) {
-                target.classList.add("drawer-open");
-                document.getElementById("drawer-backdrop").classList.add("show");
-            }
-        }
-        function closeDrawers() {
-            document.getElementById("sidebar").classList.remove("drawer-open");
-            document.getElementById("rightbar").classList.remove("drawer-open");
-            document.getElementById("drawer-backdrop").classList.remove("show");
-        }
-
-        function openModal(id) {
-            closeDrawers();
-            document.getElementById(id).classList.add("show");
-            if (id === "health-modal") startHealthPolling();
-        }
-        function closeModal(id) {
-            document.getElementById(id).classList.remove("show");
-            if (id === "health-modal") stopHealthPolling();
-        }
-
-        function ensureSharedAudioCtx() {
-            if (!sharedAudioCtx) {
-                sharedAudioCtx = new AudioContext({ latencyHint: "interactive", sampleRate: 48000 });
-                masterOutGain = sharedAudioCtx.createGain();
-                masterOutGain.gain.value = isDeafened ? 0 : 1;
-                masterOutGain.connect(sharedAudioCtx.destination);
-            }
-            if (sharedAudioCtx.state === "suspended") sharedAudioCtx.resume();
-            return sharedAudioCtx;
-        }
-
-        function playTone(freq, duration = 0.09, type = "sine") {
-            try {
-                const ctx = ensureSharedAudioCtx();
-                const osc = ctx.createOscillator();
-                const gain = ctx.createGain();
-                osc.type = type;
-                osc.frequency.value = freq;
-                gain.gain.setValueAtTime(0.06, ctx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
-                osc.connect(gain);
-                gain.connect(ctx.destination);
-                osc.start();
-                osc.stop(ctx.currentTime + duration);
-            } catch { }
-        }
-
-        function optimizeOpusSDP(sdp) {
-            return sdp.replace(/a=fmtp:(\d+) (.+)/g, (match, pt, params) => {
-                if (!sdp.includes(`a=rtpmap:${pt} opus/48000`)) return match;
-                let p = params;
-                if (!p.includes("usedtx=")) p += ";usedtx=1";
-                if (!p.includes("useinbandfec=")) p += ";useinbandfec=1";
-                if (!p.includes("maxaveragebitrate=")) p += ";maxaveragebitrate=32000";
-                if (!p.includes("minptime=")) p += ";minptime=10";
-                return `a=fmtp:${pt} ${p}`;
-            });
-        }
-
-        // --- OYUN MODU & ARKA PLAN TASARRUFU ---
-        function updateGameModeUI() {
-            document.body.classList.toggle("game-mode", gameMode);
-            const btn = document.getElementById("btn-game-mode");
-            btn.textContent = gameMode ? "🎮 Oyun Modu: AÇIK" : "🎮 Oyun Modu: Kapalı";
-            btn.className = gameMode ? "success mini" : "secondary mini";
-            if (gameMode) clearAllSpeakingVisuals();
-        }
-        document.getElementById("btn-game-mode").onclick = () => {
-            gameMode = !gameMode;
-            localStorage.setItem("bd_gamemode", gameMode ? "1" : "0");
-            updateGameModeUI();
-        };
-
-        document.addEventListener("visibilitychange", () => {
-            const videos = document.querySelectorAll("#stage-tiles video");
-            if (document.hidden) {
-                videos.forEach((v) => v.pause());
-                clearAllSpeakingVisuals();
-            } else {
-                videos.forEach((v) => v.play().catch(() => { }));
-            }
-        });
-
-        // --- TEMA & TERCİHLER ---
-        function updateGateMarkerUI() {
-            document.getElementById("gate-val").textContent = gateThreshold === 0 ? "Kapalı" : gateThreshold + "%";
-            document.getElementById("gate-slider").value = gateThreshold;
-            const pct = gateThreshold + "%";
-            document.getElementById("sidebar-gate-line").style.left = pct;
-            document.getElementById("modal-gate-line").style.left = pct;
-            document.getElementById("sidebar-gate-line").style.display = gateThreshold > 0 ? "block" : "none";
-            document.getElementById("modal-gate-line").style.display = gateThreshold > 0 ? "block" : "none";
-        }
-
-        function applyPreferences() {
-            const theme = localStorage.getItem("bd_theme") || "dark";
-            const accent = localStorage.getItem("bd_accent") || "#5865f2";
-            const fsize = localStorage.getItem("bd_fsize") || "14px";
-            document.body.dataset.theme = theme;
-            document.documentElement.style.setProperty("--accent", accent);
-            document.documentElement.style.setProperty("--font-size", fsize);
-            document.getElementById("theme-select").value = theme;
-            document.getElementById("accent-picker").value = accent;
-            document.getElementById("font-size-select").value = fsize;
-            document.getElementById("chk-ptt").checked = pttEnabled;
-            document.getElementById("btn-ptt-key").textContent = pttKey;
-            document.getElementById("ptt-indicator").textContent = `Bas-Konuş: [${pttKey.replace("Key", "")}] Tuşuna Basılı Tut`;
-            updateGateMarkerUI();
-            updateGameModeUI();
-        }
-        applyPreferences();
-
-        document.getElementById("gate-slider").oninput = (e) => {
-            gateThreshold = parseInt(e.target.value, 10);
-            localStorage.setItem("bd_gate", String(gateThreshold));
-            updateGateMarkerUI();
-        };
-        document.getElementById("theme-select").onchange = (e) => { localStorage.setItem("bd_theme", e.target.value); applyPreferences(); };
-        document.getElementById("accent-picker").oninput = (e) => { localStorage.setItem("bd_accent", e.target.value); applyPreferences(); };
-        document.getElementById("font-size-select").onchange = (e) => { localStorage.setItem("bd_fsize", e.target.value); applyPreferences(); };
-        document.getElementById("chk-mirror").onchange = () => {
-            const localVid = document.querySelector("#tile-cam-local video");
-            if (localVid) localVid.classList.toggle("mirrored", document.getElementById("chk-mirror").checked && camFacingMode === "user");
-        };
-
-        if (window.electronAPI) {
-            window.electronAPI.getGpuMode().then((disabled) => {
-                document.getElementById("chk-disable-gpu").checked = disabled;
-            });
-            document.getElementById("chk-disable-gpu").onchange = (e) => {
-                if (confirm("GPU ayarının geçerli olması için uygulama yeniden başlatılacak. Onaylıyor musun?")) {
-                    window.electronAPI.setGpuMode(e.target.checked);
-                } else e.target.checked = !e.target.checked;
-            };
-            window.electronAPI.onGlobalShortcut((action) => {
-                if (!currentVoiceChannel) return;
-                if (action === "toggle-mute") document.getElementById("btn-mute").click();
-                if (action === "toggle-deafen") document.getElementById("btn-deafen").click();
-            });
-        } else {
-            document.getElementById("gpu-setting-wrap").style.display = "none";
-        }
-
-        document.querySelectorAll(".tab-btn").forEach((btn) => {
-            btn.onclick = () => {
-                document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-                document.querySelectorAll(".tab-pane").forEach((p) => p.classList.remove("active"));
-                btn.classList.add("active");
-                document.getElementById(btn.dataset.tab).classList.add("active");
-            };
-        });
-
-        document.getElementById("btn-open-settings").onclick = () => { loadMediaDevices(); openModal("settings-modal"); };
-        document.getElementById("health-pill").onclick = () => openModal("health-modal");
-        document.getElementById("btn-open-health-top").onclick = () => openModal("health-modal");
-        document.getElementById("btn-refresh").onclick = () => location.reload();
-        document.getElementById("btn-logout").onclick = () => {
-            const tok = localStorage.getItem("bd_token");
-            if (tok) socket.emit("logout", tok);
-            localStorage.removeItem("bd_token");
-            location.reload();
-        };
-
-        // --- PING & GENEL SAĞLIK ROZETİ ---
-        function updateHealthPill(ms) {
-            lastPingMs = ms;
-            const hasFailedPeer = Array.from(peers.values()).some((p) => ["failed", "disconnected"].includes(p.pc.connectionState));
-            const dot = document.getElementById("health-dot");
-            const badge = document.getElementById("ping-badge");
-            badge.textContent = ms + " ms";
-            if (hasFailedPeer || ms >= 200) {
-                dot.textContent = "🔴"; badge.style.color = "var(--danger)";
-            } else if (ms >= 100) {
-                dot.textContent = "🟡"; badge.style.color = "var(--warn)";
-            } else {
-                dot.textContent = "🟢"; badge.style.color = "var(--success)";
-            }
-        }
-
-        setInterval(() => {
-            if (document.hidden && gameMode) return;
-            const t0 = Date.now();
-            socket.emit("ping-check", () => updateHealthPill(Date.now() - t0));
-        }, 5000);
-
-        // --- CANLI SAĞLIK & WEBRTC DIAGNOSTICS MODALI ---
-        function formatUptime(sec) {
-            const h = Math.floor(sec / 3600);
-            const m = Math.floor((sec % 3600) / 60);
-            const s = sec % 60;
-            return h > 0 ? `${h}sa ${m}dk` : `${m}dk ${s}sn`;
-        }
-
-        async function refreshHealthModal() {
-            const t0 = Date.now();
-            socket.emit("health-info", (info) => {
-                const ms = Date.now() - t0;
-                updateHealthPill(ms);
-                document.getElementById("h-ping").textContent = ms + " ms";
-                document.getElementById("h-uptime").textContent = formatUptime(info.uptimeSec || 0);
-                document.getElementById("h-ram").textContent = `${info.memRssMB} MB`;
-            });
-
-            document.getElementById("h-audio").textContent = sharedAudioCtx ? sharedAudioCtx.state : "Hazır";
-
-            const localParts = [];
-            if (currentVoiceChannel) localParts.push("Ses Kanalı: Aktif");
-            else localParts.push("Ses Kanalı: Bağlı değil");
-            if (camStream) {
-                const s = camStream.getVideoTracks()[0]?.getSettings();
-                localParts.push(`Kamera: ${s?.width || "?"}x${s?.height || "?"} @${Math.round(s?.frameRate || 0)}fps`);
-            }
-            if (screenStream) {
-                const s = screenStream.getVideoTracks()[0]?.getSettings();
-                localParts.push(`Ekran: ${s?.width || "?"}x${s?.height || "?"} @${Math.round(s?.frameRate || 0)}fps`);
-            }
-            localParts.push(`Noise Gate: ${gateThreshold > 0 ? gateThreshold + "%" : "Kapalı"}`);
-            localParts.push(`Oyun Modu: ${gameMode ? "AÇIK" : "Kapalı"}`);
-            document.getElementById("h-local-summary").textContent = localParts.join("  •  ");
-
-            const tbody = document.getElementById("h-peers-body");
-            if (peers.size === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-muted); text-align:center;">Aktif P2P bağlantısı yok.</td></tr>';
-                return;
-            }
-
-            const rowsHTML = [];
-            for (const [peerId, peer] of peers.entries()) {
-                const u = onlineUsers.find((x) => x.id === peerId);
-                const name = escapeHTML(u?.username || peerId.slice(0, 6));
-                let pathType = "Bilinmiyor";
-                let pathClass = "tag-p2p";
-                let rttStr = "--";
-                let lossStr = "0%";
-                let upKbps = 0;
-                let downKbps = 0;
-
-                try {
-                    const stats = await peer.pc.getStats();
-                    let bytesSent = 0;
-                    let bytesRecv = 0;
-                    let packetsLost = 0;
-                    let packetsRecv = 0;
-                    let activePair = null;
-                    const candidates = new Map();
-
-                    stats.forEach((rep) => {
-                        if (rep.type === "local-candidate" || rep.type === "remote-candidate") {
-                            candidates.set(rep.id, rep);
-                        }
-                        if (rep.type === "candidate-pair" && (rep.nominated || rep.state === "succeeded")) {
-                            if (!activePair || rep.nominated) activePair = rep;
-                        }
-                        if (rep.type === "outbound-rtp" && rep.bytesSent) bytesSent += rep.bytesSent;
-                        if (rep.type === "inbound-rtp") {
-                            if (rep.bytesReceived) bytesRecv += rep.bytesReceived;
-                            if (rep.packetsLost) packetsLost += Math.max(0, rep.packetsLost);
-                            if (rep.packetsReceived) packetsRecv += rep.packetsReceived;
-                        }
-                    });
-
-                    if (activePair) {
-                        if (typeof activePair.currentRoundTripTime === "number") {
-                            rttStr = Math.round(activePair.currentRoundTripTime * 1000) + " ms";
-                        }
-                        const lc = candidates.get(activePair.localCandidateId);
-                        const rc = candidates.get(activePair.remoteCandidateId);
-                        const isRelay = lc?.candidateType === "relay" || rc?.candidateType === "relay";
-                        pathType = isRelay ? "TURN Köprü" : "P2P Doğrudan";
-                        pathClass = isRelay ? "tag-turn" : "tag-p2p";
-                    }
-
-                    if (packetsRecv + packetsLost > 0) {
-                        lossStr = ((packetsLost / (packetsRecv + packetsLost)) * 100).toFixed(1) + "%";
-                    }
-
-                    const now = Date.now();
-                    if (peer.lastStats && now > peer.lastStats.ts) {
-                        const dt = (now - peer.lastStats.ts) / 1000;
-                        upKbps = Math.max(0, Math.round(((bytesSent - peer.lastStats.bytesSent) * 8) / 1000 / dt));
-                        downKbps = Math.max(0, Math.round(((bytesRecv - peer.lastStats.bytesRecv) * 8) / 1000 / dt));
-                    }
-                    peer.lastStats = { bytesSent, bytesRecv, ts: now };
-                } catch { }
-
-                rowsHTML.push(`
-          <tr>
-            <td><b>${name}</b></td>
-            <td><span class="${pathClass}">${pathType}</span></td>
-            <td>${escapeHTML(peer.pc.connectionState || peer.pc.iceConnectionState)}</td>
-            <td>${rttStr}</td>
-            <td>${lossStr}</td>
-            <td>↑${upKbps} / ↓${downKbps} kbps</td>
-            <td><button class="secondary mini" onclick="restartPeerIce('${escapeHTML(peerId)}')">Yenile</button></td>
-          </tr>
-        `);
-            }
-            tbody.innerHTML = rowsHTML.join("");
-        }
-
-        window.restartPeerIce = async (peerId) => {
-            if (!peers.has(peerId)) return;
-            await sendOfferToPeer(peerId, true);
-            refreshHealthModal();
-        };
-
-        function startHealthPolling() {
-            stopHealthPolling();
-            refreshHealthModal();
-            healthTimerId = setInterval(refreshHealthModal, 2000);
-        }
-        function stopHealthPolling() {
-            if (healthTimerId) { clearInterval(healthTimerId); healthTimerId = null; }
-        }
-
-        // --- BAŞLANGIÇ: PC DB KURTAR & OTURUM HATIRLA ---
-        const authUser = document.getElementById("auth-user");
-        const authPass = document.getElementById("auth-pass");
-        const authInvite = document.getElementById("auth-invite");
-        const authErr = document.getElementById("auth-err");
-        authUser.value = localStorage.getItem("bd_user") || "";
-
-        socket.on("server-info", ({ serverName, hasInviteCode, isFirstSetup }) => {
-            document.title = serverName;
-            document.getElementById("auth-title").textContent = serverName;
-            document.getElementById("server-name-lbl").textContent = serverName;
-            authInvite.style.display = (!isFirstSetup && hasInviteCode) ? "block" : "none";
-            document.getElementById("auth-hint").textContent = isFirstSetup
-                ? "İlk kurulum: İlk kayıt olan hesap otomatik Admin olur."
-                : hasInviteCode
-                    ? "Bu sunucu davet kodu ile korunmaktadır."
-                    : "Hesabınla giriş yap veya yeni hesap oluştur.";
-        });
-
-        async function bootSequence() {
-            if (window.electronAPI) {
-                const p = await window.electronAPI.dbPath();
-                document.getElementById("db-info").textContent = "PC DB Konumu: " + p;
-                const needsRestore = await new Promise((resolve) => socket.emit("check-db-needs-restore", resolve));
-                if (needsRestore) {
-                    const saved = await window.electronAPI.dbLoad();
-                    if (saved && saved.users && Object.keys(saved.users).length > 0) {
-                        const res = await new Promise((resolve) => socket.emit("restore-db", saved, resolve));
-                        if (res?.ok) {
-                            authErr.style.color = "var(--success)";
-                            authErr.textContent = "PC'deki veritabanı sunucuya otomatik geri yüklendi!";
-                        }
-                    }
-                }
-            }
-
-            const savedToken = localStorage.getItem("bd_token");
-            if (savedToken && !me) {
-                socket.emit("login-token", savedToken, (res) => {
-                    if (res?.ok) handleLoginSuccess(res);
-                    else localStorage.removeItem("bd_token");
-                });
-            }
-        }
-        socket.once("connect", bootSequence);
-
-        socket.on("db-sync", async (snapshot) => {
-            lastDBSnapshot = snapshot;
-            if (window.electronAPI) {
-                const res = await window.electronAPI.dbSave(snapshot);
-                if (res?.ok) {
-                    const t = new Date().toLocaleTimeString("tr-TR");
-                    document.getElementById("db-info").textContent = `Son Otomatik PC Yedeği (${t}): ${res.path}`;
-                }
-            }
-        });
-
-        document.getElementById("btn-restore-pc-db").onclick = async () => {
-            if (!window.electronAPI) return alert("Masaüstü uygulamasında çalışır; tarayıcıda 'JSON Yükle' kullan.");
-            const saved = await window.electronAPI.dbLoad();
-            if (!saved) return alert("PC'de kayıtlı veritabanı dosyası bulunamadı.");
-            socket.emit("restore-db", saved, (res) => alert(res?.ok ? "PC'deki DB sunucuya yüklendi!" : (res?.error || "Hata.")));
-        };
-
-        document.getElementById("btn-export-db").onclick = () => {
-            if (!lastDBSnapshot) return alert("Henüz yedek verisi yok.");
-            const blob = new Blob([JSON.stringify(lastDBSnapshot, null, 2)], { type: "application/json" });
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(blob);
-            a.download = "bizim_discord_db.json";
-            a.click();
-        };
-
-        document.getElementById("btn-import-db").onclick = () => document.getElementById("db-file-input").click();
-        document.getElementById("db-file-input").onchange = (e) => {
-            const f = e.target.files[0];
-            if (!f) return;
-            const r = new FileReader();
-            r.onload = () => {
-                try {
-                    socket.emit("restore-db", JSON.parse(r.result), (res) => alert(res?.ok ? "JSON yedeği yüklendi!" : (res?.error || "Hata.")));
-                } catch { alert("Geçersiz JSON dosyası."); }
-            };
-            r.readAsText(f);
-            e.target.value = "";
-        };
-
-        // --- KAYIT VE GİRİŞ ---
-        function handleLoginSuccess(res) {
-            me = res.me;
-            channels = res.channels;
-            allMessages = res.messages;
-            if (res.settings?.iceServers) iceServers = res.settings.iceServers;
-            localStorage.setItem("bd_user", me.username);
-            if (res.token) localStorage.setItem("bd_token", res.token);
-            closeModal("auth-overlay");
-            applyMeUI(res.adminSettings);
-            renderChannels();
-            renderMessages();
-            loadMediaDevices();
-        }
-
-        document.getElementById("btn-register").onclick = () => {
-            socket.emit("register", { username: authUser.value, password: authPass.value, inviteCode: authInvite.value }, (res) => {
-                if (!res.ok) { authErr.style.color = "var(--danger)"; return (authErr.textContent = res.error); }
-                authErr.style.color = "var(--success)";
-                authErr.textContent = `Kayıt başarılı (${res.role}). Şimdi Giriş Yap'a bas.`;
-            });
-        };
-
-        function doLogin() {
-            socket.emit("login", {
-                username: authUser.value,
-                password: authPass.value,
-                remember: document.getElementById("auth-remember").checked
-            }, (res) => {
-                if (!res.ok) { authErr.style.color = "var(--danger)"; return (authErr.textContent = res.error); }
-                handleLoginSuccess(res);
-            });
-        }
-        document.getElementById("btn-login").onclick = doLogin;
-        authPass.addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
-
-        function applyMeUI(adminSettings) {
-            document.getElementById("me-name").textContent = me.username;
-            document.getElementById("me-status").textContent = me.status || "Çevrimiçi";
-            const av = document.getElementById("me-avatar");
-            av.style.background = me.color || "#5865f2";
-            av.textContent = me.username.slice(0, 2).toUpperCase();
-            document.getElementById("prof-color").value = me.color || "#5865f2";
-            document.getElementById("prof-status").value = me.status || "";
-
-            const isAdm = me.role === "admin";
-            document.getElementById("tab-admin-btn").style.display = isAdm ? "block" : "none";
-            if (isAdm && adminSettings) {
-                document.getElementById("adm-server-name").value = adminSettings.serverName || "";
-                document.getElementById("adm-invite-code").value = adminSettings.inviteCode || "";
-                document.getElementById("adm-turn-url").value = adminSettings.turnServer?.url || "";
-                document.getElementById("adm-turn-user").value = adminSettings.turnServer?.username || "";
-                document.getElementById("adm-turn-pass").value = adminSettings.turnServer?.credential || "";
-            }
-        }
-
-        document.getElementById("btn-save-profile").onclick = () => {
-            me.color = document.getElementById("prof-color").value;
-            me.status = document.getElementById("prof-status").value.trim() || "Çevrimiçi";
-            socket.emit("update-profile", { color: me.color, status: me.status });
-            applyMeUI();
-        };
-
-        // --- MEDYA AYGITLARI & SES DSP ZİNCİRİ ---
-        const micSelect = document.getElementById("mic-select");
-        const spkSelect = document.getElementById("spk-select");
-        const camSelect = document.getElementById("cam-select");
-        const camQualitySelect = document.getElementById("cam-quality");
-        const micGainSlider = document.getElementById("mic-gain");
-        const chkNs = document.getElementById("chk-ns");
-        const chkAec = document.getElementById("chk-aec");
-        const chkAgc = document.getElementById("chk-agc");
-        const chkHpf = document.getElementById("chk-hpf");
-        const chkComp = document.getElementById("chk-comp");
-
-        async function loadMediaDevices() {
-            try {
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const prevMic = micSelect.value;
-                const prevSpk = spkSelect.value;
-                const prevCam = camSelect.value;
-                micSelect.innerHTML = '<option value="">Varsayılan Mikrofon</option>';
-                spkSelect.innerHTML = '<option value="">Varsayılan Çıkış</option>';
-                camSelect.innerHTML = '<option value="">Varsayılan Kamera</option>';
-                let videoInputs = 0;
-                devices.forEach((d) => {
-                    const opt = document.createElement("option");
-                    opt.value = d.deviceId;
-                    if (d.kind === "audioinput") { opt.textContent = d.label || "Mikrofon"; micSelect.appendChild(opt); }
-                    if (d.kind === "audiooutput") { opt.textContent = d.label || "Hoparlör"; spkSelect.appendChild(opt); }
-                    if (d.kind === "videoinput") { videoInputs++; opt.textContent = d.label || ("Kamera " + videoInputs); camSelect.appendChild(opt); }
-                });
-                micSelect.value = prevMic;
-                spkSelect.value = prevSpk;
-                camSelect.value = prevCam;
-                const hasMultiCam = videoInputs > 1 || /Android|iPhone|iPad/i.test(navigator.userAgent);
-                document.getElementById("btn-flip-cam").dataset.available = hasMultiCam ? "1" : "0";
-            } catch { }
-        }
-
-        micGainSlider.oninput = () => {
-            const val = parseFloat(micGainSlider.value);
-            document.getElementById("mic-gain-val").textContent = Math.round(val * 100) + "%";
-            if (micGainNode) micGainNode.gain.value = val;
-        };
-
-        spkSelect.onchange = async () => {
-            const ctx = ensureSharedAudioCtx();
-            if (ctx.setSinkId) { try { await ctx.setSinkId(spkSelect.value || ""); } catch { } }
-        };
-
-        function applyLiveDspToggles() {
-            if (highPassNode) { highPassNode.type = chkHpf.checked ? "highpass" : "allpass"; highPassNode.frequency.value = 85; }
-            if (compressorNode) {
-                compressorNode.threshold.value = chkComp.checked ? -20 : 0;
-                compressorNode.knee.value = 18;
-                compressorNode.ratio.value = chkComp.checked ? 6 : 1;
-                compressorNode.attack.value = 0.005;
-                compressorNode.release.value = 0.15;
-            }
-        }
-        chkHpf.onchange = applyLiveDspToggles;
-        chkComp.onchange = applyLiveDspToggles;
-
-        async function buildMicPipeline() {
-            const ctx = ensureSharedAudioCtx();
-            if (rawMicStream) rawMicStream.getTracks().forEach((t) => t.stop());
-            if (micSourceNode) micSourceNode.disconnect();
-
-            rawMicStream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    deviceId: micSelect.value ? { exact: micSelect.value } : undefined,
-                    noiseSuppression: chkNs.checked,
-                    echoCancellation: chkAec.checked,
-                    autoGainControl: chkAgc.checked,
-                    channelCount: 1
-                }
-            });
-
-            micSourceNode = ctx.createMediaStreamSource(rawMicStream);
-            if (!highPassNode) highPassNode = ctx.createBiquadFilter();
-            if (!micAnalyserNode) { micAnalyserNode = ctx.createAnalyser(); micAnalyserNode.fftSize = 256; }
-            if (!noiseGateNode) { noiseGateNode = ctx.createGain(); noiseGateNode.gain.value = 1; }
-            if (!compressorNode) compressorNode = ctx.createDynamicsCompressor();
-            if (!micGainNode) micGainNode = ctx.createGain();
-            if (!micDestNode) micDestNode = ctx.createMediaStreamDestination();
-
-            micGainNode.gain.value = parseFloat(micGainSlider.value);
-            applyLiveDspToggles();
-
-            micSourceNode.connect(highPassNode);
-            highPassNode.connect(micAnalyserNode);
-            highPassNode.connect(noiseGateNode);
-            noiseGateNode.connect(compressorNode);
-            compressorNode.connect(micGainNode);
-            micGainNode.connect(micDestNode);
-
-            processedMicStream = micDestNode.stream;
-            const newTrack = processedMicStream.getAudioTracks()[0];
-
-            for (const peer of peers.values()) {
-                if (peer.micSender && newTrack) await peer.micSender.replaceTrack(newTrack).catch(() => { });
-            }
-            applyMuteState();
-            startDspAndVisualLoops();
-        }
-
-        micSelect.onchange = () => { if (currentVoiceChannel) buildMicPipeline().catch(() => { }); };
-        chkNs.onchange = () => { if (currentVoiceChannel) buildMicPipeline().catch(() => { }); };
-        chkAec.onchange = () => { if (currentVoiceChannel) buildMicPipeline().catch(() => { }); };
-        chkAgc.onchange = () => { if (currentVoiceChannel) buildMicPipeline().catch(() => { }); };
-        camSelect.onchange = () => { if (camStream) restartCameraTrack(); };
-        camQualitySelect.onchange = () => { if (camStream) restartCameraTrack(); };
-
-        // Tekil Düşük-CPU DSP & Görsel Döngüler
-        function startDspAndVisualLoops() {
-            const localTimeBuf = new Uint8Array(256);
-            const remoteBuf = new Uint8Array(64);
-
-            if (!gateTimerId) {
-                gateTimerId = setInterval(() => {
-                    if (!currentVoiceChannel || !micAnalyserNode || !noiseGateNode || !sharedAudioCtx) return;
-                    if (isEffectivelyMuted()) { latestMicLevelPct = 0; gateOpen = false; return; }
-
-                    micAnalyserNode.getByteTimeDomainData(localTimeBuf);
-                    let sumSq = 0;
-                    for (let i = 0; i < localTimeBuf.length; i++) {
-                        const v = (localTimeBuf[i] - 128) / 128;
-                        sumSq += v * v;
-                    }
-                    const rms = Math.sqrt(sumSq / localTimeBuf.length);
-                    const db = rms > 0.0001 ? 20 * Math.log10(rms) : -100;
-                    latestMicLevelPct = Math.max(0, Math.min(100, Math.round(((db + 60) / 55) * 100)));
-
-                    const now = performance.now();
-                    let targetGain = 1;
-                    if (gateThreshold > 0) {
-                        if (latestMicLevelPct >= gateThreshold) { gateHoldUntil = now + 260; gateOpen = true; }
-                        else if (now < gateHoldUntil) { gateOpen = true; }
-                        else { gateOpen = false; targetGain = 0; }
-                    } else {
-                        gateOpen = latestMicLevelPct > 15;
-                    }
-                    noiseGateNode.gain.setTargetAtTime(targetGain, sharedAudioCtx.currentTime, targetGain === 1 ? 0.008 : 0.045);
-                }, 25);
-            }
-
-            if (!uiVisualTimerId) {
-                uiVisualTimerId = setInterval(() => {
-                    if (!currentVoiceChannel || document.hidden || gameMode) return;
-                    const muted = isEffectivelyMuted();
-                    const barW = muted ? "0%" : latestMicLevelPct + "%";
-                    const gatedClass = !muted && gateThreshold > 0 && !gateOpen;
-
-                    const sideMeter = document.getElementById("mic-meter");
-                    const modalMeter = document.getElementById("modal-mic-meter");
-                    sideMeter.style.width = barW;
-                    sideMeter.classList.toggle("gated", gatedClass);
-                    modalMeter.style.width = barW;
-                    modalMeter.classList.toggle("gated", gatedClass);
-
-                    setSpeakingVisual(me?.id, !muted && gateOpen);
-
-                    for (const [peerId, peer] of peers.entries()) {
-                        let speaking = false;
-                        for (const n of peer.audioNodes) {
-                            if (!n.active) continue;
-                            n.analyser.getByteFrequencyData(remoteBuf);
-                            let sum = 0;
-                            for (let i = 0; i < remoteBuf.length; i++) sum += remoteBuf[i];
-                            if (sum / remoteBuf.length > 14) { speaking = true; break; }
-                        }
-                        setSpeakingVisual(peerId, speaking);
-                    }
-                }, 100);
-            }
-        }
-
-        function stopDspAndVisualLoops() {
-            if (gateTimerId) { clearInterval(gateTimerId); gateTimerId = null; }
-            if (uiVisualTimerId) { clearInterval(uiVisualTimerId); uiVisualTimerId = null; }
-            document.getElementById("mic-meter").style.width = "0%";
-            document.getElementById("modal-mic-meter").style.width = "0%";
-            clearAllSpeakingVisuals();
-        }
-
-        function clearAllSpeakingVisuals() {
-            document.querySelectorAll(".speaking").forEach((el) => el.classList.remove("speaking"));
-        }
-
-        function setSpeakingVisual(userId, speaking) {
-            if (!userId) return;
-            document.getElementById("user-card-" + userId)?.classList.toggle("speaking", speaking);
-            document.getElementById("voice-av-" + userId)?.classList.toggle("speaking", speaking);
-            const camTileId = userId === me?.id ? "tile-cam-local" : "tile-cam-" + userId;
-            document.getElementById(camTileId)?.classList.toggle("speaking", speaking);
-            if (userId === me?.id) document.getElementById("me-avatar")?.classList.toggle("speaking", speaking);
-        }
-
-        function isEffectivelyMuted() {
-            if (serverMuted || isDeafened || isMuted) return true;
-            if (pttEnabled && !pttHeld) return true;
-            return false;
-        }
-
-        function applyMuteState() {
-            const mutedNow = isEffectivelyMuted();
-            if (processedMicStream) {
-                processedMicStream.getAudioTracks().forEach((t) => (t.enabled = !mutedNow));
-            }
-            if (masterOutGain) masterOutGain.gain.value = isDeafened ? 0 : 1;
-
-            const btnMute = document.getElementById("btn-mute");
-            const mBtnMute = document.getElementById("m-btn-mute");
-            if (serverMuted) {
-                btnMute.textContent = "Admin Susturdu"; btnMute.className = "danger";
-                mBtnMute.textContent = "🚫"; mBtnMute.className = "danger";
-            } else {
-                btnMute.textContent = (isMuted || isDeafened) ? "Mikrofon: Kapalı" : "Mikrofon: Açık";
-                btnMute.className = (isMuted || isDeafened) ? "danger" : "secondary";
-                mBtnMute.textContent = (isMuted || isDeafened) ? "🔇" : "🎙️";
-                mBtnMute.className = (isMuted || isDeafened) ? "danger" : "secondary";
-            }
-
-            const btnDeaf = document.getElementById("btn-deafen");
-            const mBtnDeaf = document.getElementById("m-btn-deafen");
-            btnDeaf.textContent = isDeafened ? "Kulaklık: Kapalı" : "Kulaklık: Açık";
-            btnDeaf.className = isDeafened ? "danger" : "secondary";
-            mBtnDeaf.textContent = isDeafened ? "🎧✕" : "🎧";
-            mBtnDeaf.className = isDeafened ? "danger" : "secondary";
-
-            const pttInd = document.getElementById("ptt-indicator");
-            pttInd.style.display = (currentVoiceChannel && pttEnabled) ? "block" : "none";
-            pttInd.classList.toggle("active", pttHeld);
-
-            socket.emit("voice-status-update", { selfMuted: isMuted || isDeafened, deafened: isDeafened });
-        }
-
-        document.getElementById("chk-ptt").onchange = (e) => {
-            pttEnabled = e.target.checked;
-            localStorage.setItem("bd_ptt", pttEnabled ? "1" : "0");
-            applyMuteState();
-        };
-        document.getElementById("btn-ptt-key").onclick = (e) => { capturingPttKey = true; e.target.textContent = "Bir tuşa bas..."; };
-
-        window.addEventListener("keydown", (e) => {
-            if (capturingPttKey) {
-                e.preventDefault();
-                pttKey = e.code;
-                localStorage.setItem("bd_ptt_key", pttKey);
-                capturingPttKey = false;
-                applyPreferences();
-                return;
-            }
-            const inInput = ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName);
-            if (!window.electronAPI) {
-                if (e.altKey && e.code === "KeyM" && currentVoiceChannel) { e.preventDefault(); document.getElementById("btn-mute").click(); return; }
-                if (e.altKey && e.code === "KeyD" && currentVoiceChannel) { e.preventDefault(); document.getElementById("btn-deafen").click(); return; }
-            }
-            if (!inInput && pttEnabled && e.code === pttKey && !pttHeld && currentVoiceChannel) {
-                pttHeld = true;
-                applyMuteState();
-            }
-        });
-        window.addEventListener("keyup", (e) => {
-            if (pttEnabled && e.code === pttKey && pttHeld) { pttHeld = false; applyMuteState(); }
-        });
-
-        // --- SAHNE YÖNETİMİ (ADAPTIVE GRID + SPOTLIGHT) ---
-        function updateStageLayout() {
-            const stage = document.getElementById("media-stage");
-            const container = document.getElementById("stage-tiles");
-            const tiles = Array.from(container.querySelectorAll(".media-tile"));
-            const count = tiles.length;
-
-            if (count === 0) {
-                stage.style.display = "none";
-                stageExpanded = false;
-                stage.classList.remove("stage-expanded");
-                document.getElementById("messages").classList.remove("hidden-by-stage");
-                spotlightTileId = null;
-                return;
-            }
-
-            stage.style.display = "flex";
-            document.getElementById("stage-count-lbl").textContent = `Canlı Sahne (${count} görüntü)`;
-
-            // Spotlight geçerliliğini kontrol et
-            if (spotlightTileId && !document.getElementById(spotlightTileId)) {
-                spotlightTileId = null;
-            }
-
-            const inSpotlight = Boolean(spotlightTileId) && count > 1;
-            container.classList.toggle("spotlight-mode", inSpotlight);
-            document.getElementById("btn-exit-spotlight").style.display = inSpotlight ? "inline-block" : "none";
-
-            tiles.forEach((t) => {
-                const focused = inSpotlight && t.id === spotlightTileId;
-                t.classList.toggle("is-spotlight", focused);
-                const pinBtn = t.querySelector(".btn-spotlight");
-                if (pinBtn) pinBtn.textContent = focused ? "Izgara" : "Öne Çıkar";
-            });
-
-            if (!inSpotlight) {
-                const isMobile = window.innerWidth <= 860;
-                let cols = 1;
-                if (count === 2) cols = isMobile ? 1 : 2;
-                else if (count <= 4) cols = 2;
-                else if (count <= 6) cols = isMobile ? 2 : 3;
-                else cols = isMobile ? 2 : 4;
-                container.style.setProperty("--cols", String(cols));
-            }
-        }
-        window.addEventListener("resize", updateStageLayout);
-
-        function toggleSpotlight(tileDomId) {
-            spotlightTileId = (spotlightTileId === tileDomId) ? null : tileDomId;
-            updateStageLayout();
-        }
-
-        document.getElementById("btn-exit-spotlight").onclick = () => {
-            spotlightTileId = null;
-            updateStageLayout();
-        };
-
-        document.getElementById("btn-expand-stage").onclick = () => {
-            stageExpanded = !stageExpanded;
-            document.getElementById("media-stage").classList.toggle("stage-expanded", stageExpanded);
-            document.getElementById("messages").classList.toggle("hidden-by-stage", stageExpanded);
-            document.getElementById("btn-expand-stage").textContent = stageExpanded ? "Sohbeti Göster" : "Tam Sahne";
-        };
-
-        function showMediaTile(tileKey, label, stream, opts = {}) {
-            const domId = "tile-" + tileKey;
-            const container = document.getElementById("stage-tiles");
-            let tile = document.getElementById(domId);
-
-            if (!tile) {
-                tile = document.createElement("div");
-                tile.id = domId;
-                tile.className = "media-tile" + (opts.kind === "screen" ? " is-screen" : "");
-                tile.dataset.streamId = stream.id || "";
-                tile.onclick = () => toggleSpotlight(domId);
-
-                const video = document.createElement("video");
-                video.autoplay = true;
-                video.playsInline = true;
-                video.muted = true; // Tüm sesler merkezi Web Audio üzerinden %200 kontrollü akar
-
-                const bar = document.createElement("div");
-                bar.className = "tile-overlay-bar";
-
-                const span = document.createElement("span");
-                span.className = "tile-label";
-
-                const btns = document.createElement("div");
-                btns.className = "tile-btns";
-
-                const spotBtn = document.createElement("button");
-                spotBtn.className = "btn-spotlight";
-                spotBtn.textContent = "Öne Çıkar";
-                spotBtn.onclick = (e) => { e.stopPropagation(); toggleSpotlight(domId); };
-
-                const fsBtn = document.createElement("button");
-                fsBtn.textContent = "⛶";
-                fsBtn.title = "Tam Ekran";
-                fsBtn.onclick = (e) => { e.stopPropagation(); video.requestFullscreen?.(); };
-
-                btns.append(spotBtn, fsBtn);
-                bar.append(span, btns);
-                tile.append(video, bar);
-                container.appendChild(tile);
-            }
-
-            const vid = tile.querySelector("video");
-            if (vid.srcObject !== stream) vid.srcObject = stream;
-            vid.classList.toggle("mirrored", Boolean(opts.isLocal && opts.kind === "cam" && document.getElementById("chk-mirror").checked && camFacingMode === "user"));
-            tile.querySelector(".tile-label").textContent = label;
-            if (document.hidden) vid.pause();
-            else vid.play().catch(() => { });
-
-            updateStageLayout();
-        }
-
-        function removeMediaTile(tileKey) {
-            document.getElementById("tile-" + tileKey)?.remove();
-            updateStageLayout();
-        }
-
-        // --- KANALLAR & SOHBET ---
-        function renderChannels() {
-            const textChEl = document.getElementById("text-channels");
-            const voiceChEl = document.getElementById("voice-channels");
-            textChEl.innerHTML = "";
-            voiceChEl.innerHTML = "";
-
-            const activeChObj = channels.find((c) => c.id === activeTextChannel) || channels.find((c) => c.type === "text");
-            if (activeChObj) {
-                activeTextChannel = activeChObj.id;
-                document.getElementById("active-channel-title").textContent = "# " + activeChObj.name;
-                document.getElementById("active-channel-topic").textContent = activeChObj.topic || "";
-            }
-
-            channels.forEach((ch) => {
-                const li = document.createElement("li");
-                li.className = "channel-item" + (ch.id === activeTextChannel || ch.id === currentVoiceChannel ? " active" : "");
-
-                const left = document.createElement("span");
-                left.textContent = (ch.type === "text" ? "# " : "🔊 ") + ch.name;
-                li.appendChild(left);
-
-                const rightBox = document.createElement("span");
-                rightBox.style.display = "flex";
-                rightBox.style.gap = "4px";
-                rightBox.style.alignItems = "center";
-
-                if (ch.type === "text" && unreadCounts[ch.id] > 0 && ch.id !== activeTextChannel) {
-                    const dot = document.createElement("span");
-                    dot.className = "unread-dot";
-                    dot.textContent = unreadCounts[ch.id];
-                    rightBox.appendChild(dot);
-                }
-
-                if (me?.role === "admin" && channels.length > 1) {
-                    const del = document.createElement("button");
-                    del.textContent = "x";
-                    del.className = "danger mini";
-                    del.onclick = (e) => { e.stopPropagation(); if (confirm(`"${ch.name}" kanalı silinsin mi?`)) socket.emit("admin-delete-channel", ch.id); };
-                    rightBox.appendChild(del);
-                }
-                li.appendChild(rightBox);
-
-                if (ch.type === "text") {
-                    li.onclick = () => {
-                        activeTextChannel = ch.id;
-                        unreadCounts[ch.id] = 0;
-                        if (stageExpanded) document.getElementById("btn-expand-stage").click();
-                        renderChannels();
-                        renderMessages();
-                        closeDrawers();
-                    };
-                    textChEl.appendChild(li);
-                } else {
-                    li.onclick = () => { joinVoiceChannel(ch.id, ch.name); closeDrawers(); };
-                    voiceChEl.appendChild(li);
-
-                    const occ = onlineUsers.filter((u) => u.voiceChannel === ch.id);
-                    if (occ.length) {
-                        const sub = document.createElement("ul");
-                        sub.className = "voice-occupants";
-                        occ.forEach((u) => {
-                            const item = document.createElement("li");
-                            item.className = "voice-occ-item";
-                            const leftPart = document.createElement("span");
-                            leftPart.className = "voice-occ-left";
-                            leftPart.innerHTML = `<span id="voice-av-${escapeHTML(u.id)}" class="mini-avatar" style="background:${escapeHTML(u.color)}">${escapeHTML(u.username.slice(0, 2).toUpperCase())}</span><span>${escapeHTML(u.username)}</span>`;
-                            const rightPart = document.createElement("span");
-                            rightPart.style.display = "flex";
-                            rightPart.style.gap = "4px";
-                            rightPart.style.alignItems = "center";
-                            if (u.camOn) rightPart.innerHTML += '<span class="cam-pill">CAM</span>';
-                            if (u.screenSharing) rightPart.innerHTML += '<span class="live-pill">YAYIN</span>';
-                            if (u.serverMuted) rightPart.innerHTML += '<span>🚫</span>';
-                            else if (u.selfMuted) rightPart.innerHTML += '<span>🔇</span>';
-                            if (u.deafened) rightPart.innerHTML += '<span>🎧</span>';
-                            item.append(leftPart, rightPart);
-                            sub.appendChild(item);
-                        });
-                        voiceChEl.appendChild(sub);
-                    }
-                }
-            });
-        }
-
-        function formatMessageBody(text) {
-            let safe = escapeHTML(text);
-            safe = safe.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
-            safe = safe.replace(/@([a-zA-Z0-9._-]+)/g, '<span class="mention-hl">@$1</span>');
-            return safe;
-        }
-
-        function createMessageElement(msg) {
-            const div = document.createElement("div");
-            const isMentioned = me && msg.text && msg.text.toLowerCase().includes("@" + me.username.toLowerCase());
-            div.className = "msg" + (isMentioned ? " mentioned" : "") + (msg.pinned ? " pinned-msg" : "");
-            div.id = "msg-" + msg.id;
-
-            // Mobilde dokununca aksiyon menüsünü aç/kapat
-            div.onclick = (e) => {
-                if (window.innerWidth > 860 || e.target.closest("button, a, img, .react-pill")) return;
-                const wasOpen = div.classList.contains("show-actions");
-                document.querySelectorAll(".msg.show-actions").forEach((m) => m.classList.remove("show-actions"));
-                if (!wasOpen) div.classList.add("show-actions");
-            };
-
-            const actions = document.createElement("div");
-            actions.className = "msg-actions";
-            ["👍", "😂", "🔥", "❤️"].forEach((em) => {
-                const b = document.createElement("button");
-                b.textContent = em;
-                b.onclick = () => socket.emit("toggle-reaction", { channelId: msg.channelId, msgId: msg.id, emoji: em });
-                actions.appendChild(b);
-            });
-            const repBtn = document.createElement("button");
-            repBtn.textContent = "↩️";
-            repBtn.onclick = () => setReplyTarget(msg);
-            actions.appendChild(repBtn);
-
-            if (me?.role === "admin") {
-                const pinBtn = document.createElement("button");
-                pinBtn.textContent = "📌";
-                pinBtn.onclick = () => socket.emit("toggle-pin", { channelId: msg.channelId, msgId: msg.id });
-                actions.appendChild(pinBtn);
-            }
-            if (me?.role === "admin" || msg.sender === me?.username) {
-                const delBtn = document.createElement("button");
-                delBtn.textContent = "🗑️";
-                delBtn.onclick = () => socket.emit("delete-message", { channelId: msg.channelId, msgId: msg.id });
-                actions.appendChild(delBtn);
-            }
-            div.appendChild(actions);
-
-            if (msg.replyTo) {
-                const rp = document.createElement("div");
-                rp.className = "msg-reply-preview";
-                rp.textContent = `↪ ${msg.replyTo.sender}: ${msg.replyTo.text}`;
-                div.appendChild(rp);
-            }
-
-            const hdr = document.createElement("div");
-            hdr.className = "msg-header";
-            hdr.innerHTML =
-                (msg.role === "admin" ? '<span class="admin-tag">ADMIN</span>' : "") +
-                `<span class="sender" style="color:${escapeHTML(msg.color || "#fff")}">${escapeHTML(msg.sender)}</span>` +
-                `<span class="time">${escapeHTML(msg.time)}</span>` +
-                (msg.pinned ? '<span class="pin-tag">📌 Sabitlendi</span>' : "");
-            div.appendChild(hdr);
-
-            if (msg.text) {
-                const body = document.createElement("div");
-                body.className = "body";
-                body.innerHTML = formatMessageBody(msg.text);
-                div.appendChild(body);
-            }
-
-            if (msg.image) {
-                const img = document.createElement("img");
-                img.src = msg.image;
-                img.className = "chat-img";
-                img.loading = "lazy";
-                img.onclick = () => { document.getElementById("lightbox-img").src = msg.image; openModal("lightbox"); };
-                div.appendChild(img);
-            }
-
-            if (msg.reactions && Object.keys(msg.reactions).length) {
-                const rRow = document.createElement("div");
-                rRow.className = "reactions-row";
-                for (const [emoji, who] of Object.entries(msg.reactions)) {
-                    const pill = document.createElement("span");
-                    pill.className = "react-pill" + (who.includes(me?.username) ? " mine" : "");
-                    pill.title = who.join(", ");
-                    pill.textContent = `${emoji} ${who.length}`;
-                    pill.onclick = () => socket.emit("toggle-reaction", { channelId: msg.channelId, msgId: msg.id, emoji });
-                    rRow.appendChild(pill);
-                }
-                div.appendChild(rRow);
-            }
-            return div;
-        }
-
-        function renderMessages() {
-            const messagesEl = document.getElementById("messages");
-            messagesEl.innerHTML = "";
-            const q = searchQuery.trim().toLowerCase();
-            (allMessages[activeTextChannel] || []).slice(-120).forEach((msg) => {
-                if (q && !(msg.text || "").toLowerCase().includes(q) && !msg.sender.toLowerCase().includes(q)) return;
-                messagesEl.appendChild(createMessageElement(msg));
-            });
-            messagesEl.scrollTop = messagesEl.scrollHeight;
-        }
-
-        document.getElementById("search-input").oninput = (e) => { searchQuery = e.target.value; renderMessages(); };
-        document.getElementById("btn-pins").onclick = () => {
-            const list = document.getElementById("pins-list");
-            list.innerHTML = "";
-            const pinned = (allMessages[activeTextChannel] || []).filter((m) => m.pinned);
-            if (!pinned.length) list.innerHTML = '<div style="color:var(--text-muted); font-size:13px;">Bu kanalda sabitlenmiş mesaj yok.</div>';
-            else pinned.forEach((m) => list.appendChild(createMessageElement(m)));
-            openModal("pins-modal");
-        };
-
-        function setReplyTarget(msg) {
-            replyTarget = { id: msg.id, sender: msg.sender, text: msg.text || "[Resim]", hasImage: Boolean(msg.image) };
-            document.getElementById("reply-text").textContent = `${msg.sender} kullanıcısına yanıt: "${replyTarget.text.slice(0, 50)}"`;
-            document.getElementById("reply-banner").style.display = "flex";
-            document.getElementById("chat-input").focus();
-        }
-        function clearReply() { replyTarget = null; document.getElementById("reply-banner").style.display = "none"; }
-        document.getElementById("btn-cancel-reply").onclick = clearReply;
-
-        const chatInput = document.getElementById("chat-input");
-        function compressAndSendImage(file) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const img = new Image();
-                img.onload = () => {
-                    const canvas = document.createElement("canvas");
-                    const scale = Math.min(1, 1000 / img.width);
-                    canvas.width = img.width * scale;
-                    canvas.height = img.height * scale;
-                    canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
-                    const dataUrl = canvas.toDataURL("image/jpeg", 0.78);
-                    socket.emit("chat-message", { channelId: activeTextChannel, text: chatInput.value, image: dataUrl, replyTo: replyTarget });
-                    chatInput.value = "";
-                    clearReply();
-                };
-                img.src = e.target.result;
-            };
-            reader.readAsDataURL(file);
-        }
-
-        document.getElementById("btn-img").onclick = () => document.getElementById("img-input").click();
-        document.getElementById("img-input").onchange = (e) => { if (e.target.files[0]) compressAndSendImage(e.target.files[0]); e.target.value = ""; };
-        chatInput.addEventListener("paste", (e) => {
-            const item = Array.from(e.clipboardData?.items || []).find((i) => i.type.startsWith("image/"));
-            if (item) { e.preventDefault(); compressAndSendImage(item.getAsFile()); }
-        });
-
-        chatInput.oninput = () => {
-            socket.emit("typing", { channelId: activeTextChannel, isTyping: true });
-            clearTimeout(typingTimeout);
-            typingTimeout = setTimeout(() => socket.emit("typing", { channelId: activeTextChannel, isTyping: false }), 1500);
-        };
-
-        document.getElementById("chat-form").onsubmit = (e) => {
-            e.preventDefault();
-            if (!chatInput.value.trim()) return;
-            socket.emit("chat-message", { channelId: activeTextChannel, text: chatInput.value, replyTo: replyTarget });
-            socket.emit("typing", { channelId: activeTextChannel, isTyping: false });
-            chatInput.value = "";
-            clearReply();
-        };
-
-        socket.on("chat-message", (msg) => {
-            if (!allMessages[msg.channelId]) allMessages[msg.channelId] = [];
-            allMessages[msg.channelId].push(msg);
-            if (me && msg.sender !== me.username && msg.text?.toLowerCase().includes("@" + me.username.toLowerCase())) {
-                playTone(760, 0.12, "triangle");
-            }
-            if (msg.channelId === activeTextChannel) {
-                const el = document.getElementById("messages");
-                if (!searchQuery.trim()) {
-                    el.appendChild(createMessageElement(msg));
-                    while (el.children.length > 120) el.firstChild.remove();
-                    el.scrollTop = el.scrollHeight;
-                } else renderMessages();
-            } else {
-                unreadCounts[msg.channelId] = (unreadCounts[msg.channelId] || 0) + 1;
-                renderChannels();
-            }
-        });
-
-        socket.on("message-updated", (updated) => {
-            const list = allMessages[updated.channelId];
-            if (!list) return;
-            const idx = list.findIndex((m) => m.id === updated.id);
-            if (idx !== -1) list[idx] = updated;
-            if (updated.channelId === activeTextChannel) document.getElementById("msg-" + updated.id)?.replaceWith(createMessageElement(updated));
-        });
-
-        socket.on("message-deleted", ({ channelId, msgId }) => {
-            if (allMessages[channelId]) allMessages[channelId] = allMessages[channelId].filter((m) => m.id !== msgId);
-            document.getElementById("msg-" + msgId)?.remove();
-        });
-
-        socket.on("user-typing", ({ channelId, username, isTyping }) => {
-            if (channelId !== activeTextChannel) return;
-            if (isTyping) typingUsers.set(username, true);
-            else typingUsers.delete(username);
-            const arr = Array.from(typingUsers.keys());
-            document.getElementById("typing-bar").textContent = arr.length ? `${arr.join(", ")} yazıyor...` : "";
-        });
-
-        // --- KULLANICI LİSTESİ ---
-        socket.on("state-update", ({ users, channels: chs, settings }) => {
-            onlineUsers = users;
-            channels = chs;
-            if (settings) {
-                if (settings.serverName) { document.title = settings.serverName; document.getElementById("server-name-lbl").textContent = settings.serverName; }
-                if (settings.iceServers) iceServers = settings.iceServers;
-            }
-            renderChannels();
-
-            document.getElementById("online-count").textContent = users.length;
-            const userListEl = document.getElementById("user-list");
-            userListEl.innerHTML = "";
-
-            users.forEach((u) => {
-                const li = document.createElement("li");
-                li.className = "user-card";
-                li.id = "user-card-" + u.id;
-
-                const icons = [
-                    u.role === "admin" ? "👑" : "",
-                    u.camOn ? "📹" : "",
-                    u.screenSharing ? "🖥️" : "",
-                    u.voiceChannel ? "🔊" : "",
-                    u.serverMuted ? "🚫" : u.selfMuted ? "🔇" : "",
-                    u.deafened ? "🎧" : ""
-                ].filter(Boolean).join(" ");
-
-                const top = document.createElement("div");
-                top.className = "user-top";
-                top.innerHTML = `<span style="display:flex;align-items:center;gap:7px;"><span class="mini-avatar" style="background:${escapeHTML(u.color)}">${escapeHTML(u.username.slice(0, 2).toUpperCase())}</span><b style="color:${escapeHTML(u.color)}">${escapeHTML(u.username)}</b></span><span>${icons}</span>`;
-                li.appendChild(top);
-
-                const st = document.createElement("div");
-                st.className = "user-status";
-                st.textContent = u.status || "Çevrimiçi";
-                li.appendChild(st);
-
-                if (u.id !== me?.id && u.voiceChannel) {
-                    const volRow = document.createElement("div");
-                    volRow.className = "vol-row";
-                    const curVol = userVolumes.has(u.id) ? userVolumes.get(u.id) : 1;
-                    const lbl = document.createElement("span");
-                    lbl.textContent = Math.round(curVol * 100) + "%";
-                    lbl.style.minWidth = "34px";
-                    const slider = document.createElement("input");
-                    slider.type = "range"; slider.min = "0"; slider.max = "2"; slider.step = "0.05"; slider.value = curVol;
-                    slider.oninput = (e) => {
-                        const v = parseFloat(e.target.value);
-                        userVolumes.set(u.id, v);
-                        lbl.textContent = Math.round(v * 100) + "%";
-                        const peer = peers.get(u.id);
-                        if (peer) peer.audioNodes.forEach((n) => (n.gain.gain.value = v));
-                    };
-                    volRow.append(document.createTextNode("Ses:"), slider, lbl);
-                    li.appendChild(volRow);
-                }
-
-                if (me?.role === "admin" && u.id !== me.id) {
-                    const acts = document.createElement("div");
-                    acts.className = "row";
-                    const mBtn = document.createElement("button");
-                    mBtn.className = "secondary mini";
-                    mBtn.textContent = u.serverMuted ? "Sesi Aç" : "Sustur";
-                    mBtn.onclick = () => socket.emit("admin-toggle-mute", u.id);
-
-                    const rBtn = document.createElement("button");
-                    rBtn.className = "secondary mini";
-                    rBtn.textContent = u.role === "admin" ? "Yetki Al" : "Admin";
-                    rBtn.onclick = () => socket.emit("admin-toggle-role", u.id);
-
-                    const kBtn = document.createElement("button");
-                    kBtn.className = "danger mini";
-                    kBtn.textContent = "At";
-                    kBtn.onclick = () => socket.emit("admin-kick", u.id);
-
-                    acts.append(mBtn, rBtn, kBtn);
-                    li.appendChild(acts);
-                }
-                userListEl.appendChild(li);
-            });
-        });
-
-        document.getElementById("btn-add-ch").onclick = () => {
-            const name = document.getElementById("new-ch-name").value;
-            const type = document.getElementById("new-ch-type").value;
-            const topic = document.getElementById("new-ch-topic").value;
-            if (!name.trim()) return;
-            socket.emit("admin-create-channel", { name, type, topic });
-            document.getElementById("new-ch-name").value = "";
-            document.getElementById("new-ch-topic").value = "";
-        };
-
-        document.getElementById("btn-save-server-settings").onclick = () => {
-            socket.emit("admin-update-settings", {
-                serverName: document.getElementById("adm-server-name").value,
-                inviteCode: document.getElementById("adm-invite-code").value,
-                turnUrl: document.getElementById("adm-turn-url").value,
-                turnUser: document.getElementById("adm-turn-user").value,
-                turnPass: document.getElementById("adm-turn-pass").value
-            }, (res) => { if (res?.ok) alert("Sunucu ayarları kaydedildi!"); });
-        };
-
-        // --- WEBRTC (SES + ÇOKLU KAMERA + EKRAN PAYLAŞIMI) ---
-        function getCamConstraints() {
-            const q = parseInt(camQualitySelect.value, 10) || 480;
-            const fps = q <= 360 ? 15 : q <= 480 ? 24 : 30;
-            const video = { height: { ideal: q }, frameRate: { ideal: fps } };
-            if (camSelect.value) video.deviceId = { exact: camSelect.value };
-            else video.facingMode = camFacingMode;
-            return { video, audio: false };
-        }
-
-        async function applyVideoBitrateLimit(sender, kind, height) {
-            try {
-                const params = sender.getParameters();
-                if (!params.encodings || !params.encodings.length) params.encodings = [{}];
-                if (kind === "screen") {
-                    params.encodings[0].maxBitrate = height <= 720 ? 1_500_000 : 2_500_000;
-                } else {
-                    // 10 kişilik Mesh odada upload taşmasın diye dinamik kamera bitrate sınırı
-                    const base = height <= 360 ? 350_000 : height <= 480 ? 600_000 : 1_100_000;
-                    const peerScale = peers.size >= 5 ? 0.65 : 1;
-                    params.encodings[0].maxBitrate = Math.round(base * peerScale);
-                }
-                await sender.setParameters(params);
-            } catch { }
-        }
-
-        function getOrCreatePeer(peerId) {
-            if (peers.has(peerId)) return peers.get(peerId);
-            const pc = new RTCPeerConnection({ iceServers });
-            const peer = {
-                pc,
-                polite: socket.id < peerId,
-                makingOffer: false,
-                ignoreOffer: false,
-                pendingCandidates: [],
-                micSender: null,
-                camSender: null,
-                screenSenders: [],
-                audioNodes: [],
-                lastStats: null
-            };
-            peers.set(peerId, peer);
-
-            if (processedMicStream) {
-                const mt = processedMicStream.getAudioTracks()[0];
-                if (mt) peer.micSender = pc.addTrack(mt, processedMicStream);
-            }
-            if (camStream) {
-                const ct = camStream.getVideoTracks()[0];
-                if (ct) {
-                    peer.camSender = pc.addTrack(ct, camStream);
-                    applyVideoBitrateLimit(peer.camSender, "cam", parseInt(camQualitySelect.value, 10) || 480);
-                }
-            }
-            if (screenStream) {
-                screenStream.getTracks().forEach((t) => {
-                    const s = pc.addTrack(t, screenStream);
-                    peer.screenSenders.push(s);
-                    if (t.kind === "video") applyVideoBitrateLimit(s, "screen", 720);
-                });
-            }
-
-            pc.onicecandidate = (e) => {
-                if (e.candidate) socket.emit("webrtc-ice", { to: peerId, candidate: e.candidate });
-            };
-
-            pc.onconnectionstatechange = () => updateHealthPill(lastPingMs);
-
-            pc.ontrack = (e) => {
-                if (e.receiver && "playoutDelayHint" in e.receiver) {
-                    e.receiver.playoutDelayHint = 0;
-                }
-                const stream = e.streams[0] || new MediaStream([e.track]);
-                if (e.track.kind === "audio") {
-                    attachRemoteAudio(peerId, peer, e.track, stream);
-                } else if (e.track.kind === "video") {
-                    const u = onlineUsers.find((x) => x.id === peerId);
-                    const name = u ? u.username : "Arkadaş";
-                    let kind = "cam";
-                    if (u?.screenStreamId && stream.id === u.screenStreamId) {
-                        kind = "screen";
-                    } else if (u?.camStreamId && stream.id === u.camStreamId) {
-                        kind = "cam";
-                    } else if (document.getElementById("tile-cam-" + peerId) || (u?.screenSharing && !u?.camOn)) {
-                        kind = "screen";
-                    }
-
-                    const tileKey = (kind === "screen" ? "screen-" : "cam-") + peerId;
-                    const label = kind === "screen" ? `🖥️ ${name} (Ekran)` : `📹 ${name}`;
-                    showMediaTile(tileKey, label, stream, { kind, isLocal: false });
-                    e.track.onended = () => removeMediaTile(tileKey);
-                }
-            };
-
-            return peer;
-        }
-
-        function attachRemoteAudio(peerId, peer, track, stream) {
-            const sinkEl = document.createElement("audio");
-            sinkEl.autoplay = true;
-            sinkEl.muted = true;
-            sinkEl.srcObject = stream;
-            document.getElementById("hidden-audio-sink").appendChild(sinkEl);
-
-            const ctx = ensureSharedAudioCtx();
-            const src = ctx.createMediaStreamSource(new MediaStream([track]));
-            const gain = ctx.createGain();
-            gain.gain.value = userVolumes.has(peerId) ? userVolumes.get(peerId) : 1;
-            const analyser = ctx.createAnalyser();
-            analyser.fftSize = 128;
-
-            src.connect(gain);
-            gain.connect(analyser);
-            gain.connect(masterOutGain);
-
-            const nodeObj = { trackId: track.id, src, gain, analyser, sinkEl, active: true };
-            peer.audioNodes.push(nodeObj);
-            track.onended = () => cleanupRemoteAudioNode(peer, nodeObj);
-        }
-
-        function cleanupRemoteAudioNode(peer, nodeObj) {
-            nodeObj.active = false;
-            try { nodeObj.src.disconnect(); nodeObj.gain.disconnect(); nodeObj.analyser.disconnect(); } catch { }
-            nodeObj.sinkEl.remove();
-            peer.audioNodes = peer.audioNodes.filter((n) => n !== nodeObj);
-        }
-
-        async function sendOfferToPeer(peerId, iceRestart = false) {
-            const peer = getOrCreatePeer(peerId);
-            try {
-                peer.makingOffer = true;
-                const offer = await peer.pc.createOffer(iceRestart ? { iceRestart: true } : undefined);
-                offer.sdp = optimizeOpusSDP(offer.sdp);
-                await peer.pc.setLocalDescription(offer);
-                socket.emit("webrtc-offer", { to: peerId, offer: peer.pc.localDescription });
-            } catch { } finally {
-                peer.makingOffer = false;
-            }
-        }
-
-        async function flushCandidates(peer) {
-            const q = peer.pendingCandidates;
-            peer.pendingCandidates = [];
-            for (const c of q) await peer.pc.addIceCandidate(c).catch(() => { });
-        }
-
-        function closePeer(peerId) {
-            const peer = peers.get(peerId);
-            if (peer) {
-                peer.audioNodes.slice().forEach((n) => cleanupRemoteAudioNode(peer, n));
-                peer.pc.close();
-                peers.delete(peerId);
-            }
-            setSpeakingVisual(peerId, false);
-            removeMediaTile("cam-" + peerId);
-            removeMediaTile("screen-" + peerId);
-        }
-
-        // --- SES KANALINA KATILMA / AYRILMA ---
-        async function joinVoiceChannel(channelId, channelName) {
-            if (currentVoiceChannel === channelId) return;
-            if (currentVoiceChannel) leaveVoiceCleanup();
-
-            try { await buildMicPipeline(); }
-            catch (err) { return alert("Mikrofon açılamadı: " + err.message); }
-
-            playTone(540, 0.1);
-            currentVoiceChannel = channelId;
-            document.getElementById("voice-status").textContent = "🔊 Bağlı: " + channelName;
-            document.getElementById("voice-status").style.color = "var(--success)";
-            document.getElementById("voice-btns-1").style.display = "flex";
-            document.getElementById("voice-btns-2").style.display = "flex";
-            document.getElementById("voice-btns-3").style.display = "flex";
-            document.getElementById("mobile-voice-bar").classList.add("in-voice");
-            applyMuteState();
-            renderChannels();
-
-            socket.emit("join-voice", channelId, async (existingPeers) => {
-                for (const peerId of existingPeers) await sendOfferToPeer(peerId);
-            });
-        }
-
-        function leaveVoiceCleanup() {
-            stopCamera();
-            stopScreenShare();
-            stopDspAndVisualLoops();
-            Array.from(peers.keys()).forEach(closePeer);
-            rawMicStream?.getTracks().forEach((t) => t.stop());
-            rawMicStream = processedMicStream = null;
-            currentVoiceChannel = null;
-            isDeafened = false;
-            pttHeld = false;
-            document.getElementById("voice-status").textContent = "Ses kanalında değilsin";
-            document.getElementById("voice-status").style.color = "var(--text-muted)";
-            document.getElementById("voice-btns-1").style.display = "none";
-            document.getElementById("voice-btns-2").style.display = "none";
-            document.getElementById("voice-btns-3").style.display = "none";
-            document.getElementById("ptt-indicator").style.display = "none";
-            document.getElementById("mobile-voice-bar").classList.remove("in-voice");
-            renderChannels();
-        }
-
-        // --- KAMERA AÇ / KAPAT / ÇEVİR ---
-        async function toggleCamera() {
-            if (!currentVoiceChannel) return alert("Kamera açmak için önce bir ses kanalına katıl.");
-            if (camStream) return stopCamera();
-
-            try {
-                camStream = await navigator.mediaDevices.getUserMedia(getCamConstraints());
-            } catch (err) {
-                return alert("Kamera açılamadı (izin ver veya başka program kullanıyor mu kontrol et): " + err.message);
-            }
-
-            const vTrack = camStream.getVideoTracks()[0];
-            vTrack.onended = stopCamera;
-
-            showMediaTile("cam-local", `📹 ${me.username} (Sen)`, camStream, { kind: "cam", isLocal: true });
-            updateCamButtonsUI(true);
-            socket.emit("voice-status-update", { camOn: true, camStreamId: camStream.id });
-
-            const q = parseInt(camQualitySelect.value, 10) || 480;
-            for (const [peerId, peer] of peers.entries()) {
-                peer.camSender = peer.pc.addTrack(vTrack, camStream);
-                await applyVideoBitrateLimit(peer.camSender, "cam", q);
-                await sendOfferToPeer(peerId);
-            }
-        }
-
-        async function restartCameraTrack() {
-            if (!camStream) return;
-            try {
-                const nextStream = await navigator.mediaDevices.getUserMedia(getCamConstraints());
-                const newTrack = nextStream.getVideoTracks()[0];
-                const oldTrack = camStream.getVideoTracks()[0];
-                camStream.removeTrack(oldTrack);
-                oldTrack.stop();
-                camStream.addTrack(newTrack);
-                newTrack.onended = stopCamera;
-
-                for (const peer of peers.values()) {
-                    if (peer.camSender) {
-                        await peer.camSender.replaceTrack(newTrack).catch(() => { });
-                        await applyVideoBitrateLimit(peer.camSender, "cam", parseInt(camQualitySelect.value, 10) || 480);
-                    }
-                }
-                showMediaTile("cam-local", `📹 ${me.username} (Sen)`, camStream, { kind: "cam", isLocal: true });
-            } catch (err) {
-                alert("Kamera değiştirilemedi: " + err.message);
-            }
-        }
-
-        async function flipCamera() {
-            camSelect.value = "";
-            camFacingMode = camFacingMode === "user" ? "environment" : "user";
-            await restartCameraTrack();
-        }
-
-        async function stopCamera() {
-            if (!camStream) return;
-            camStream.getTracks().forEach((t) => t.stop());
-            camStream = null;
-            removeMediaTile("cam-local");
-            updateCamButtonsUI(false);
-
-            for (const [peerId, peer] of peers.entries()) {
-                if (peer.camSender) {
-                    try { peer.pc.removeTrack(peer.camSender); } catch { }
-                    peer.camSender = null;
-                    await sendOfferToPeer(peerId);
-                }
-            }
-            socket.emit("cam-stopped");
-        }
-
-        function updateCamButtonsUI(active) {
-            const btn = document.getElementById("btn-cam");
-            const mBtn = document.getElementById("m-btn-cam");
-            btn.textContent = active ? "📹 Kapat" : "📹 Kamera";
-            btn.className = active ? "success" : "secondary";
-            mBtn.className = active ? "success" : "secondary";
-
-            const showFlip = active && document.getElementById("btn-flip-cam").dataset.available === "1";
-            document.getElementById("btn-flip-cam").style.display = showFlip ? "block" : "none";
-            document.getElementById("m-btn-flip").style.display = showFlip ? "block" : "none";
-        }
-
-        document.getElementById("btn-cam").onclick = toggleCamera;
-        document.getElementById("m-btn-cam").onclick = toggleCamera;
-        document.getElementById("btn-flip-cam").onclick = flipCamera;
-        document.getElementById("m-btn-flip").onclick = flipCamera;
-
-        document.getElementById("btn-leave-voice").onclick = () => { playTone(330, 0.11); socket.emit("leave-voice"); leaveVoiceCleanup(); };
-        document.getElementById("m-btn-leave").onclick = () => document.getElementById("btn-leave-voice").click();
-        document.getElementById("btn-mute").onclick = () => { if (serverMuted) return; isMuted = !isMuted; playTone(isMuted ? 380 : 490, 0.07); applyMuteState(); };
-        document.getElementById("m-btn-mute").onclick = () => document.getElementById("btn-mute").click();
-        document.getElementById("btn-deafen").onclick = () => { isDeafened = !isDeafened; playTone(isDeafened ? 300 : 510, 0.08); applyMuteState(); };
-        document.getElementById("m-btn-deafen").onclick = () => document.getElementById("btn-deafen").click();
-
-        // --- EKRAN PAYLAŞIMI ---
-        document.getElementById("btn-screen").onclick = async () => {
-            if (screenStream) return stopScreenShare();
-            if (window.electronAPI) {
-                const sources = await window.electronAPI.getScreenSources();
-                const grid = document.getElementById("source-grid");
-                grid.innerHTML = "";
-                selectedScreenSourceId = sources[0]?.id || null;
-                sources.forEach((s) => {
-                    const card = document.createElement("div");
-                    card.className = "source-card" + (s.id === selectedScreenSourceId ? " selected" : "");
-                    card.innerHTML = `<img src="${s.thumbnail}" /><span>${escapeHTML(s.name)}</span>`;
-                    card.onclick = () => {
-                        selectedScreenSourceId = s.id;
-                        grid.querySelectorAll(".source-card").forEach((c) => c.classList.remove("selected"));
-                        card.classList.add("selected");
-                    };
-                    grid.appendChild(card);
-                });
-                openModal("screen-modal");
-            } else {
-                await startScreenCapture(720, 30, true);
-            }
-        };
-
-        document.getElementById("btn-start-share").onclick = async () => {
-            const resH = parseInt(document.getElementById("screen-res").value, 10);
-            const fps = parseInt(document.getElementById("screen-fps").value, 10);
-            const withAudio = document.getElementById("screen-audio").checked;
-            closeModal("screen-modal");
-            if (window.electronAPI) await window.electronAPI.selectScreenSource({ sourceId: selectedScreenSourceId, withAudio });
-            await startScreenCapture(resH, fps, withAudio);
-        };
-
-        async function startScreenCapture(height, frameRate, withAudio) {
-            try {
-                screenStream = await navigator.mediaDevices.getDisplayMedia({
-                    video: { height: { ideal: height }, frameRate: { ideal: frameRate } },
-                    audio: withAudio
-                });
-            } catch (err) {
-                return alert("Ekran paylaşımı başlatılamadı: " + err.message);
-            }
-
-            const vTrack = screenStream.getVideoTracks()[0];
-            if (vTrack) vTrack.onended = stopScreenShare;
-
-            showMediaTile("screen-local", "🖥️ Senin Ekranın (Canlı)", screenStream, { kind: "screen", isLocal: true });
-            document.getElementById("btn-screen").textContent = "🖥️ Durdur";
-            document.getElementById("btn-screen").className = "danger";
-            socket.emit("voice-status-update", { screenSharing: true, screenStreamId: screenStream.id });
-
-            for (const [peerId, peer] of peers.entries()) {
-                for (const t of screenStream.getTracks()) {
-                    const sender = peer.pc.addTrack(t, screenStream);
-                    peer.screenSenders.push(sender);
-                    if (t.kind === "video") await applyVideoBitrateLimit(sender, "screen", height);
-                }
-                await sendOfferToPeer(peerId);
-            }
-        }
-
-        async function stopScreenShare() {
-            if (!screenStream) return;
-            screenStream.getTracks().forEach((t) => t.stop());
-            screenStream = null;
-            removeMediaTile("screen-local");
-
-            for (const [peerId, peer] of peers.entries()) {
-                peer.screenSenders.forEach((s) => { try { peer.pc.removeTrack(s); } catch { } });
-                peer.screenSenders = [];
-                await sendOfferToPeer(peerId);
-            }
-            document.getElementById("btn-screen").textContent = "🖥️ Ekran";
-            document.getElementById("btn-screen").className = "secondary";
-            socket.emit("screen-share-stopped");
-        }
-
-        // --- WEBRTC SİNYALLERİ ---
-        socket.on("webrtc-offer", async ({ from, offer }) => {
-            if (!currentVoiceChannel) return;
-            const peer = getOrCreatePeer(from);
-            const pc = peer.pc;
-
-            const offerCollision = peer.makingOffer || pc.signalingState !== "stable";
-            peer.ignoreOffer = !peer.polite && offerCollision;
-            if (peer.ignoreOffer) return;
-
-            try {
-                await pc.setRemoteDescription(offer);
-                await flushCandidates(peer);
-                const answer = await pc.createAnswer();
-                answer.sdp = optimizeOpusSDP(answer.sdp);
-                await pc.setLocalDescription(answer);
-                socket.emit("webrtc-answer", { to: from, answer: pc.localDescription });
-            } catch { }
-        });
-
-        socket.on("webrtc-answer", async ({ from, answer }) => {
-            const peer = peers.get(from);
-            if (!peer) return;
-            try { await peer.pc.setRemoteDescription(answer); await flushCandidates(peer); } catch { }
-        });
-
-        socket.on("webrtc-ice", async ({ from, candidate }) => {
-            const peer = peers.get(from);
-            if (!peer || peer.ignoreOffer) return;
-            if (peer.pc.remoteDescription) await peer.pc.addIceCandidate(candidate).catch(() => { });
-            else peer.pendingCandidates.push(candidate);
-        });
-
-        socket.on("user-left-voice", closePeer);
-        socket.on("screen-share-stopped", (peerId) => removeMediaTile("screen-" + peerId));
-        socket.on("cam-stopped", (peerId) => removeMediaTile("cam-" + peerId));
-        socket.on("force-leave-voice", leaveVoiceCleanup);
-
-        socket.on("voice-event", ({ type, channelId }) => {
-            if (currentVoiceChannel && channelId === currentVoiceChannel && !isDeafened) {
-                playTone(type === "join" ? 590 : 350, 0.09);
-            }
-        });
-
-        socket.on("server-mute-status", (muted) => { serverMuted = muted; applyMuteState(); });
-        socket.on("role-updated", ({ role, adminSettings }) => { if (!me) return; me.role = role; applyMeUI(adminSettings); });
-        socket.on("kicked", (reason) => { alert(reason); location.reload(); });
-    </script>
+    <script src="/app.js"></script>
 </body>
 
 </html>

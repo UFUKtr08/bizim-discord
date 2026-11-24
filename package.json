@@ -1,7 +1,7 @@
 {
   "name": "bizim-discord",
-  "version": "4.0.0",
-  "description": "Oyun ve görüntülü sohbet odaklı düşük gecikmeli iletişim uygulaması",
+  "version": "5.0.0",
+  "description": "Oyun ve görüntülü sohbet odaklı düşük gecikmeli çoklu sunuculu iletişim uygulaması",
   "author": "UFUKtr08",
   "main": "electron-main.js",
   "scripts": {
@@ -23,6 +23,7 @@
     "files": [
       "electron-main.js",
       "preload.js",
+      "overlay.html",
       "package.json"
     ],
     "win": {

@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BizimDiscord Overlay</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            background: transparent !important;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+            pointer-events: none;
+            font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        :root {
+            --ov-avatar: 28px;
+            --ov-font: 13px;
+            --ov-gap: 8px;
+            --ov-row-gap: 6px;
+            --ov-pad-y: 3px;
+            --ov-pad-x: 8px;
+            --ov-icon: 14px;
+            --ov-ring: 2px;
+        }
+
+        body.size-sm {
+            --ov-avatar: 22px;
+            --ov-font: 11.5px;
+            --ov-gap: 6px;
+            --ov-row-gap: 5px;
+            --ov-pad-y: 2px;
+            --ov-pad-x: 6px;
+            --ov-icon: 12px;
+            --ov-ring: 2px;
+        }
+
+        body.size-md {
+            --ov-avatar: 28px;
+            --ov-font: 13px;
+            --ov-gap: 8px;
+            --ov-row-gap: 6px;
+            --ov-pad-y: 3px;
+            --ov-pad-x: 8px;
+            --ov-icon: 14px;
+            --ov-ring: 2px;
+        }
+
+        body.size-lg {
+            --ov-avatar: 34px;
+            --ov-font: 14.5px;
+            --ov-gap: 10px;
+            --ov-row-gap: 8px;
+            --ov-pad-y: 4px;
+            --ov-pad-x: 10px;
+            --ov-icon: 16px;
+            --ov-ring: 2.5px;
+        }
+
+        #root {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            padding: 6px;
+            gap: var(--ov-row-gap);
+        }
+
+        /* Köşe Hizalamaları */
+        body.pos-top-left #root {
+            justify-content: flex-start;
+            align-items: flex-start;
+        }
+
+        body.pos-top-right #root {
+            justify-content: flex-start;
+            align-items: flex-end;
+        }
+
+        body.pos-bottom-left #root {
+            justify-content: flex-end;
+            align-items: flex-start;
+        }
+
+        body.pos-bottom-right #root {
+            justify-content: flex-end;
+            align-items: flex-end;
+        }
+
+        .ov-user {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--ov-gap);
+            padding: var(--ov-pad-y) var(--ov-pad-x);
+            border-radius: 999px;
+            background: rgba(12, 13, 16, 0.42);
+            max-width: 100%;
+            transition: background 0.14s ease, opacity 0.14s ease;
+        }
+
+        body.pos-top-right .ov-user,
+        body.pos-bottom-right .ov-user {
+            flex-direction: row-reverse;
+        }
+
+        .ov-user.speaking {
+            background: rgba(12, 13, 16, 0.64);
+        }
+
+        .ov-user.muted {
+            opacity: 0.78;
+        }
+
+        .ov-avatar {
+            width: var(--ov-avatar);
+            height: var(--ov-avatar);
+            border-radius: 50%;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: calc(var(--ov-avatar) * 0.44);
+            font-weight: 700;
+            color: #ffffff;
+            background: #5865f2;
+            overflow: hidden;
+            border: var(--ov-ring) solid rgba(255, 255, 255, 0.16);
+            box-shadow: 0 0 0 0 rgba(35, 165, 90, 0);
+            transition: border-color 0.12s ease, box-shadow 0.12s ease;
+        }
+
+        .ov-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        /* Konuşurken avatar etrafında ince yeşil ışık halkası */
+        .ov-user.speaking .ov-avatar {
+            border-color: #23a55a;
+            box-shadow: 0 0 0 1.5px rgba(35, 165, 90, 0.55), 0 0 10px rgba(35, 165, 90, 0.75);
+        }
+
+        .ov-name {
+            color: rgba(242, 244, 248, 0.9);
+            font-size: var(--ov-font);
+            font-weight: 600;
+            line-height: 1.2;
+            letter-spacing: 0.1px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 175px;
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.92), 0 0 1px rgba(0, 0, 0, 0.95);
+            transition: color 0.12s ease;
+        }
+
+        .ov-user.speaking .ov-name {
+            color: #ffffff;
+        }
+
+        /* Yalnızca mikrofon kapalıysa gösterilen kırmızı dış hatlı üzeri çizili minimal mikrofon */
+        .ov-muted-icon {
+            width: var(--ov-icon);
+            height: var(--ov-icon);
+            flex-shrink: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.85));
+        }
+
+        .ov-muted-icon svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+    </style>
+</head>
+
+<body class="pos-top-left size-md">
+    <div id="root"></div>
+
+    <script>
+        const rootEl = document.getElementById("root");
+
+        const MUTED_MIC_SVG = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="#f23f43" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M9 9v3a3 3 0 0 0 5.12 2.12"></path>
+                <path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"></path>
+                <path d="M17 16.95A7 7 0 0 1 5 12v-2"></path>
+                <path d="M19 10v2a7 7 0 0 1-.11 1.23"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+                <line x1="2" y1="2" x2="22" y2="22"></line>
+            </svg>
+        `;
+
+        function applyConfig(cfg) {
+            if (!cfg) return;
+            const pos = ["top-left", "top-right", "bottom-left", "bottom-right"].includes(cfg.position)
+                ? cfg.position
+                : "top-left";
+            const size = ["sm", "md", "lg"].includes(cfg.size) ? cfg.size : "md";
+            document.body.className = `pos-${pos} size-${size}`;
+        }
+
+        function renderUsers(payload) {
+            const users = payload && payload.active && Array.isArray(payload.users) ? payload.users : [];
+            rootEl.innerHTML = "";
+
+            if (!users.length) return;
+
+            const frag = document.createDocumentFragment();
+            // Maksimum 10 kişi için kompakt liste
+            users.slice(0, 10).forEach((u) => {
+                const isMuted = Boolean(u.muted || u.serverMuted || u.deafened);
+                const isSpeaking = Boolean(u.speaking) && !isMuted;
+
+                const row = document.createElement("div");
+                row.className = "ov-user" + (isSpeaking ? " speaking" : "") + (isMuted ? " muted" : "");
+
+                const avatar = document.createElement("div");
+                avatar.className = "ov-avatar";
+                avatar.style.background = u.color || "#5865f2";
+
+                if (u.avatar && typeof u.avatar === "string" && (u.avatar.startsWith("data:image/") || u.avatar.startsWith("http"))) {
+                    const img = document.createElement("img");
+                    img.src = u.avatar;
+                    img.alt = "";
+                    avatar.appendChild(img);
+                } else {
+                    const initial = (u.displayName || u.username || "?").trim().charAt(0).toUpperCase();
+                    avatar.textContent = initial || "?";
+                }
+
+                const nameEl = document.createElement("span");
+                nameEl.className = "ov-name";
+                nameEl.textContent = u.displayName || u.username || "Kullanıcı";
+
+                row.appendChild(avatar);
+                row.appendChild(nameEl);
+
+                // Mikrofon açıksa ekstra ikon yok; yalnızca kapalıysa kırmızı dış hatlı çarpılı mikrofon
+                if (isMuted) {
+                    const iconWrap = document.createElement("span");
+                    iconWrap.className = "ov-muted-icon";
+                    iconWrap.innerHTML = MUTED_MIC_SVG;
+                    row.appendChild(iconWrap);
+                }
+
+                frag.appendChild(row);
+            });
+
+            rootEl.appendChild(frag);
+        }
+
+        if (window.electronAPI) {
+            window.electronAPI.onOverlayConfig(applyConfig);
+            window.electronAPI.onOverlayData(renderUsers);
+            window.electronAPI.getOverlayConfig().then(applyConfig).catch(() => { });
+        }
+    </script>
+</body>
+
+</html>
