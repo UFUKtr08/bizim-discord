@@ -6,7 +6,8 @@ const {
     ipcMain,
     shell,
     globalShortcut,
-    screen
+    screen,
+    net
 } = require("electron");
 const path = require("path");
 const fs = require("fs");
@@ -405,33 +406,50 @@ function createWindow() {
       <h2>BizimDiscord v5.0 Başlatılıyor...</h2>
       <p>Sunucu uyku modundaysa uyanması 20-30 saniye sürebilir. Hazır olduğunda otomatik bağlanacak.</p>
       <div id="st" class="status">Sunucu kontrol ediliyor...</div>
-      <script>
-        const target = ${JSON.stringify(SERVER_URL)};
-        let tries = 0;
-        async function pingServer() {
-          tries++;
-          document.getElementById("st").textContent = "Bağlantı denemesi #" + tries + "...";
-          try {
-            const res = await fetch(target + "/health", { cache: "no-store" });
-            if (res.ok) { location.href = target; return; }
-          } catch {}
-          setTimeout(pingServer, 2000);
-        }
-        pingServer();
-      </script>
     </body>
     </html>
     `;
 
     mainWin.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(wakeUpHTML));
 
+    let tries = 0;
+    let stopped = false;
+
     mainWin.on("closed", () => {
+        stopped = true;
         if (overlayWin && !overlayWin.isDestroyed()) {
             overlayWin.destroy();
             overlayWin = null;
         }
         mainWin = null;
     });
+
+    async function wakeAndLoadServer() {
+        if (stopped || !mainWin || mainWin.isDestroyed()) return;
+        tries++;
+        mainWin.webContents
+            .executeJavaScript(`document.getElementById("st") && (document.getElementById("st").textContent = "Bağlantı denemesi #${tries}...")`)
+            .catch(() => { });
+
+        try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 8000);
+            const res = await net.fetch(SERVER_URL + "/health", {
+                cache: "no-store",
+                signal: controller.signal
+            });
+            clearTimeout(timer);
+
+            if (res.ok && !stopped && mainWin && !mainWin.isDestroyed()) {
+                mainWin.loadURL(SERVER_URL);
+                return;
+            }
+        } catch { }
+
+        if (!stopped) setTimeout(wakeAndLoadServer, 2000);
+    }
+
+    wakeAndLoadServer();
 
     if (perfConfig.overlay.enabled && !bootedWithoutGpu) {
         createOverlayWindow();
