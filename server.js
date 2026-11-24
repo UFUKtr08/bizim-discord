@@ -13,16 +13,39 @@ const io = new Server(server, {
 
 const PORT = process.env.PORT || 3000;
 const DB_FILE = path.join(__dirname, "data.json");
+const SERVER_STARTED_AT = Date.now();
 
-// Render Environment kısmına ADMIN_USER ve ADMIN_PASS girersen
-// sunucu sıfırlansa bile Admin hesabın kalıcı olarak korunur.
 const ENV_ADMIN_USER = (process.env.ADMIN_USER || "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "");
 const ENV_ADMIN_PASS = (process.env.ADMIN_PASS || "").trim();
 
 app.use(express.static(path.join(__dirname, "public")));
 
+function getServerHealthSnapshot() {
+    const mem = process.memoryUsage();
+    let inVoice = 0;
+    let camCount = 0;
+    let screenCount = 0;
+    for (const u of activeUsers.values()) {
+        if (u.voiceChannel) inVoice++;
+        if (u.camOn) camCount++;
+        if (u.screenSharing) screenCount++;
+    }
+    return {
+        ok: true,
+        time: Date.now(),
+        uptimeSec: Math.floor((Date.now() - SERVER_STARTED_AT) / 1000),
+        memRssMB: Math.round(mem.rss / 1024 / 1024),
+        memHeapMB: Math.round(mem.heapUsed / 1024 / 1024),
+        onlineUsers: activeUsers.size,
+        inVoice,
+        camCount,
+        screenCount,
+        registeredUsers: Object.keys(db.users).length
+    };
+}
+
 app.get("/health", (_req, res) => {
-    res.status(200).json({ ok: true, time: Date.now() });
+    res.status(200).json(getServerHealthSnapshot());
 });
 
 const DEFAULT_ICE = [
@@ -43,7 +66,7 @@ function createDefaultDB() {
         channels: [
             { id: "genel", name: "genel-sohbet", type: "text", topic: "Herkese açık ana sohbet kanalı" },
             { id: "medya", name: "medya-ve-linkler", type: "text", topic: "Ekran görüntüleri, klipler ve linkler" },
-            { id: "ses-1", name: "Ana Ses Odası", type: "voice", topic: "" },
+            { id: "ses-1", name: "Ana Ses & Kamera", type: "voice", topic: "" },
             { id: "ses-2", name: "Oyun / Yayın Odası", type: "voice", topic: "" }
         ],
         messages: { genel: [], medya: [] },
@@ -89,7 +112,6 @@ function normalizeDB(raw) {
         }
     };
 
-    // Ortam değişkenindeki Admin her zaman mevcut ve yetkili olsun
     if (ENV_ADMIN_USER && ENV_ADMIN_PASS.length >= 4 && !normalized.users[ENV_ADMIN_USER]) {
         const { salt, hash } = hashPassword(ENV_ADMIN_PASS);
         normalized.users[ENV_ADMIN_USER] = {
@@ -159,7 +181,10 @@ function broadcastState() {
         serverMuted: u.serverMuted,
         selfMuted: u.selfMuted,
         deafened: u.deafened,
-        screenSharing: u.screenSharing
+        camOn: u.camOn,
+        camStreamId: u.camStreamId,
+        screenSharing: u.screenSharing,
+        screenStreamId: u.screenStreamId
     }));
     io.emit("state-update", {
         users: list,
@@ -190,7 +215,10 @@ function completeUserSession(socket, clean, record, tokenToReturn) {
         serverMuted: false,
         selfMuted: false,
         deafened: false,
-        screenSharing: false
+        camOn: false,
+        camStreamId: null,
+        screenSharing: false,
+        screenStreamId: null
     });
 
     if (record.role === "admin") {
@@ -226,7 +254,10 @@ io.on("connection", (socket) => {
         if (typeof cb === "function") cb();
     });
 
-    // Sunucu sıfırdan/boş uyandıysa Admin PC'sindeki yedeği otomatik kabul et
+    socket.on("health-info", (cb) => {
+        if (typeof cb === "function") cb(getServerHealthSnapshot());
+    });
+
     socket.on("check-db-needs-restore", (cb) => {
         const needs = Object.keys(db.users).length === 0 || Boolean(db.meta?.seededOnly);
         if (typeof cb === "function") cb(needs);
@@ -257,7 +288,6 @@ io.on("connection", (socket) => {
         cb?.({ ok: true });
     });
 
-    // 1. KAYIT OLMA
     socket.on("register", ({ username, password, inviteCode }, cb) => {
         const clean = (username || "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "").slice(0, 20);
         if (!clean || clean.length < 2) {
@@ -289,7 +319,6 @@ io.on("connection", (socket) => {
         cb({ ok: true, role: db.users[clean].role });
     });
 
-    // 2. GİRİŞ YAPMA & OTURUM HATIRLAMA
     socket.on("login", ({ username, password, remember }, cb) => {
         const clean = (username || "").trim().toLowerCase();
         const record = db.users[clean];
@@ -322,7 +351,6 @@ io.on("connection", (socket) => {
         }
     });
 
-    // Profil güncelleme
     socket.on("update-profile", ({ color, status }) => {
         const user = activeUsers.get(socket.id);
         if (!user || !db.users[user.username]) return;
@@ -340,7 +368,6 @@ io.on("connection", (socket) => {
         broadcastState();
     });
 
-    // 3. ZENGİN SOHBET
     socket.on("chat-message", ({ channelId, text, image, replyTo }) => {
         const user = activeUsers.get(socket.id);
         if (!user || (!text?.trim() && !image)) return;
@@ -424,7 +451,7 @@ io.on("connection", (socket) => {
         socket.broadcast.emit("user-typing", { channelId, username: user.username, isTyping });
     });
 
-    // 4. SES KANALLARI
+    // --- SES & KAMERA KANALLARI ---
     socket.on("join-voice", (channelId, cb) => {
         const user = activeUsers.get(socket.id);
         if (!user) return;
@@ -441,7 +468,10 @@ io.on("connection", (socket) => {
         }
 
         user.voiceChannel = channelId;
+        user.camOn = false;
+        user.camStreamId = null;
         user.screenSharing = false;
+        user.screenStreamId = null;
         broadcastState();
         socket.broadcast.emit("voice-event", { type: "join", username: user.username, channelId });
         cb(peersInChannel);
@@ -452,22 +482,28 @@ io.on("connection", (socket) => {
         if (!user || !user.voiceChannel) return;
         const oldCh = user.voiceChannel;
         user.voiceChannel = null;
+        user.camOn = false;
+        user.camStreamId = null;
         user.screenSharing = false;
+        user.screenStreamId = null;
         socket.broadcast.emit("user-left-voice", socket.id);
         socket.broadcast.emit("voice-event", { type: "leave", username: user.username, channelId: oldCh });
         broadcastState();
     });
 
-    socket.on("voice-status-update", ({ selfMuted, deafened, screenSharing }) => {
+    socket.on("voice-status-update", (payload) => {
         const user = activeUsers.get(socket.id);
-        if (!user) return;
-        if (typeof selfMuted === "boolean") user.selfMuted = selfMuted;
-        if (typeof deafened === "boolean") user.deafened = deafened;
-        if (typeof screenSharing === "boolean") user.screenSharing = screenSharing;
+        if (!user || !payload) return;
+        if (typeof payload.selfMuted === "boolean") user.selfMuted = payload.selfMuted;
+        if (typeof payload.deafened === "boolean") user.deafened = payload.deafened;
+        if (typeof payload.camOn === "boolean") user.camOn = payload.camOn;
+        if (payload.camStreamId !== undefined) user.camStreamId = payload.camStreamId || null;
+        if (typeof payload.screenSharing === "boolean") user.screenSharing = payload.screenSharing;
+        if (payload.screenStreamId !== undefined) user.screenStreamId = payload.screenStreamId || null;
         broadcastState();
     });
 
-    // 5. WEBRTC SİNYALLEŞME
+    // --- WEBRTC SİNYALLEŞME ---
     socket.on("webrtc-offer", ({ to, offer }) => {
         io.to(to).emit("webrtc-offer", { from: socket.id, offer });
     });
@@ -479,12 +515,18 @@ io.on("connection", (socket) => {
     });
     socket.on("screen-share-stopped", () => {
         const user = activeUsers.get(socket.id);
-        if (user) user.screenSharing = false;
+        if (user) { user.screenSharing = false; user.screenStreamId = null; }
         socket.broadcast.emit("screen-share-stopped", socket.id);
         broadcastState();
     });
+    socket.on("cam-stopped", () => {
+        const user = activeUsers.get(socket.id);
+        if (user) { user.camOn = false; user.camStreamId = null; }
+        socket.broadcast.emit("cam-stopped", socket.id);
+        broadcastState();
+    });
 
-    // 6. ADMİN YETKİLERİ
+    // --- ADMİN YETKİLERİ ---
     socket.on("admin-kick", (targetId) => {
         if (!isAdmin(socket) || targetId === socket.id) return;
         io.to(targetId).emit("kicked", "Admin tarafından odadan atıldınız.");
@@ -535,6 +577,10 @@ io.on("connection", (socket) => {
         for (const [sid, u] of activeUsers.entries()) {
             if (u.voiceChannel === channelId) {
                 u.voiceChannel = null;
+                u.camOn = false;
+                u.camStreamId = null;
+                u.screenSharing = false;
+                u.screenStreamId = null;
                 io.to(sid).emit("force-leave-voice");
                 io.emit("user-left-voice", sid);
             }

@@ -7,7 +7,6 @@ const fs = require("fs");
 // =========================================================================
 const SERVER_URL = process.env.SERVER_URL || "https://bizim-discord.onrender.com";
 
-// Oyun Performansı: Varsayılan olarak GPU hızlandırmayı kapat (FPS/G-Sync koruması)
 const PERF_CFG_PATH = path.join(app.getPath("userData"), "perf-config.json");
 function readPerfConfig() {
     try {
@@ -22,7 +21,6 @@ if (perfConfig.disableGpu) {
     app.commandLine.appendSwitch("disable-gpu-compositing");
 }
 
-// Tam ekran oyundayken Windows'un WebRTC ses akışını yavaşlatmasını engelle
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("disable-background-timer-throttling");
 app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
@@ -88,10 +86,10 @@ ipcMain.handle("select-screen-source", async (_event, opts) => {
 
 function createWindow() {
     mainWin = new BrowserWindow({
-        width: 1260,
-        height: 810,
-        minWidth: 940,
-        minHeight: 620,
+        width: 1280,
+        height: 820,
+        minWidth: 380,
+        minHeight: 560,
         title: "BizimDiscord",
         autoHideMenuBar: true,
         backgroundColor: "#1e1f22",
@@ -103,6 +101,12 @@ function createWindow() {
     });
 
     session.defaultSession.clearCache();
+
+    // Kamera, mikrofon ve tam ekran izinlerini otomatik onayla
+    session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+        const allowed = ["media", "mediaKeySystem", "fullscreen", "display-capture"];
+        callback(allowed.includes(permission));
+    });
 
     mainWin.webContents.setWindowOpenHandler(({ url }) => {
         if (url.startsWith("http://") || url.startsWith("https://")) {
@@ -164,7 +168,6 @@ function createWindow() {
 
     mainWin.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(wakeUpHTML));
 
-    // Tam ekran oyundan Alt+Tab yapmadan çalışan global kısayollar
     globalShortcut.register("Alt+M", () => {
         mainWin?.webContents.send("global-shortcut", "toggle-mute");
     });

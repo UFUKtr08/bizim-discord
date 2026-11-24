@@ -1,7 +1,7 @@
 {
   "name": "bizim-discord",
-  "version": "3.5.0",
-  "description": "Oyun odakli dusuk gecikmeli sesli ve metin sohbet uygulamasi",
+  "version": "4.0.0",
+  "description": "Oyun ve görüntülü sohbet odaklı düşük gecikmeli iletişim uygulaması",
   "author": "UFUKtr08",
   "main": "electron-main.js",
   "scripts": {
