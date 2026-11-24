@@ -9,43 +9,76 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>BizimDiscord</title>
     <link rel="manifest" href="/manifest.json" />
-    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icon.png" type="image/png" />
     <link rel="stylesheet" href="/style.css" />
 </head>
 
 <body data-theme="dark">
 
-    <!-- MOBİL ÇEKMECE ARKA PLANI -->
     <div id="drawer-backdrop"></div>
-
-    <!-- TOAST BİLDİRİM ALANI -->
     <div id="toast-container" aria-live="polite"></div>
 
-    <!-- GİRİŞ / KAYIT EKRANI -->
+    <!-- GİRİŞ / KAYIT / KİŞİSEL KURTARMA KODU EKRANI -->
     <div id="auth-overlay" class="overlay show">
         <div class="modal-box auth-card">
             <div class="auth-logo">
-                <img src="/icon.svg" alt="BizimDiscord" width="44" height="44" />
+                <img src="/icon.png" alt="BizimDiscord" width="58" height="58"
+                    style="border-radius:50%; object-fit:cover;" />
             </div>
             <h2 id="auth-title">BizimDiscord</h2>
             <p id="auth-hint" class="muted-note center">
                 İlk kayıt olan hesap otomatik Genel Yönetici olur.
             </p>
-            <div class="field-group">
-                <input id="auth-user" placeholder="Kullanıcı adı (harf/rakam)" autocomplete="username" />
-                <input id="auth-pass" type="password" placeholder="Şifre (en az 4 karakter)"
-                    autocomplete="current-password" />
-                <input id="auth-invite" placeholder="Sunucu Davet Kodu (isteğe bağlı / kayıt için)"
-                    style="display:none;" />
+
+            <div class="tab-bar" style="justify-content:center;">
+                <button type="button" class="tab-btn active" id="auth-tab-login">Giriş / Kayıt</button>
+                <button type="button" class="tab-btn" id="auth-tab-recover">Şifre Kurtarma</button>
             </div>
-            <label class="check-row">
-                <input id="auth-remember" type="checkbox" checked />
-                <span>Oturumu Hatırla</span>
-            </label>
-            <div class="btn-row">
-                <button id="btn-login" class="btn primary">Giriş Yap</button>
-                <button id="btn-register" class="btn secondary">Kayıt Ol</button>
+
+            <!-- GİRİŞ & KAYIT FORMU -->
+            <div id="auth-pane-login" class="tab-pane active">
+                <div class="field-group">
+                    <input id="auth-user" placeholder="Kullanıcı adı (harf/rakam)" autocomplete="username" />
+                    <input id="auth-pass" type="password" placeholder="Şifre (en az 4 karakter)"
+                        autocomplete="current-password" />
+                    <input id="auth-invite" placeholder="Sunucu Davet Kodu (isteğe bağlı / kayıt için)"
+                        style="display:none;" />
+                </div>
+                <label class="check-row">
+                    <input id="auth-remember" type="checkbox" checked />
+                    <span>Oturumu Hatırla</span>
+                </label>
+                <div class="btn-row">
+                    <button type="button" id="btn-login" class="btn primary">Giriş Yap</button>
+                    <button type="button" id="btn-register" class="btn secondary">Kayıt Ol</button>
+                </div>
             </div>
+
+            <!-- KİŞİSEL KURTARMA KODU İLE ŞİFRE SIFIRLAMA -->
+            <div id="auth-pane-recover" class="tab-pane">
+                <p class="muted-note center">
+                    Kayıt sırasında verilen 12 haneli <b>Kişisel Kurtarma Kodu</b> ile yeni şifre belirle.
+                </p>
+                <div class="field-group">
+                    <input id="rec-user" placeholder="Kullanıcı adı" autocomplete="username" />
+                    <input id="rec-code" placeholder="Kurtarma Kodu (ör: ABCD-1234-EFGH)" autocomplete="off" />
+                    <input id="rec-new-pass" type="password" placeholder="Yeni şifre (en az 4 karakter)"
+                        autocomplete="new-password" />
+                </div>
+                <button type="button" id="btn-do-recover" class="btn primary">Şifreyi Yenile</button>
+            </div>
+
+            <!-- YENİ OLUŞTURULAN KİŞİSEL KURTARMA KODU KARTI -->
+            <div id="recovery-code-box" class="card-block" style="display:none; text-align:left;">
+                <div class="field-lbl">Kişisel Kurtarma Kodun (Bunu güvenli bir yere kaydet!)</div>
+                <div id="recovery-code-val" class="db-box center"
+                    style="font-size:15px; font-weight:700; letter-spacing:1px;"></div>
+                <div class="btn-row">
+                    <button type="button" id="btn-copy-rec-code" class="btn xs secondary">Kodu Kopyala</button>
+                    <button type="button" id="btn-dismiss-rec-code" class="btn xs primary">Kaydettim, Devam Et</button>
+                </div>
+            </div>
+
             <small id="auth-err" class="error-text center"></small>
         </div>
     </div>
@@ -53,10 +86,7 @@
     <!-- ANA UYGULAMA KABUĞU -->
     <div id="app-shell">
 
-        <!-- SOL ÇEKMECE SARICI (Sunucu Şeridi + Kanal Paneli) -->
         <div id="left-dock">
-
-            <!-- EN SOL: İNCE SUNUCU GEÇİŞ ŞERİDİ -->
             <nav id="server-rail" aria-label="Sunucular">
                 <button id="btn-dm-rail" class="rail-btn rail-dm" title="1-1 Fısıltılar (DM)">
                     <span class="rail-icon">💬</span>
@@ -64,9 +94,7 @@
                 </button>
 
                 <div class="rail-sep"></div>
-
                 <div id="server-list" class="rail-list"></div>
-
                 <div class="rail-sep"></div>
 
                 <button id="btn-add-server" class="rail-btn rail-add" title="Sunucu Oluştur veya Davet Koduyla Katıl">
@@ -74,14 +102,13 @@
                 </button>
             </nav>
 
-            <!-- KANAL & SES KONTROL PANELİ -->
             <aside id="sidebar">
                 <header class="brand-hdr">
                     <button id="btn-server-menu" class="server-title-btn" title="Sunucu Bilgisi & Davet">
                         <span id="server-name-lbl">BizimDiscord</span>
                         <span class="caret">▾</span>
                     </button>
-                    <button id="health-pill" class="health-pill" title="Bağlantı & Sistem Sağlığı">
+                    <button id="health-pill" class="health-pill" title="Dinamik Zorlanma, Bağlantı & Sistem Sağlığı">
                         <span id="health-dot" class="dot-ind"></span>
                         <span id="ping-badge">-- ms</span>
                     </button>
@@ -103,12 +130,11 @@
                     <ul id="voice-channels" class="channel-list"></ul>
                 </div>
 
-                <!-- ALT SES & PROFİL PANELİ -->
                 <div id="voice-panel">
                     <div id="voice-conn-wrap" style="display:none;">
                         <div class="voice-conn-top">
                             <div class="voice-conn-meta">
-                                <span id="voice-status" class="voice-status-lbl">Bağlı</span>
+                                <span id="voice-status" class="voice-status-lbl">Ses Bağlı</span>
                                 <span id="voice-channel-sub" class="voice-sub-lbl"></span>
                             </div>
                             <button id="btn-leave-voice" class="icon-btn danger-soft"
@@ -149,7 +175,6 @@
             </aside>
         </div>
 
-        <!-- ORTA ANA ALAN -->
         <main id="main">
             <header id="topbar">
                 <div class="ch-meta">
@@ -159,7 +184,6 @@
                 </div>
 
                 <div class="topbar-right">
-                    <!-- EKİP & OYUN ARAÇLARI TEK TEMİZ MENÜ -->
                     <div class="tools-wrap">
                         <button id="btn-tools-menu" class="pill-btn" title="Ekip & Oyun Araçları">
                             <span>🧰</span><span class="hide-sm">Araçlar</span>
@@ -198,8 +222,7 @@
                         </div>
                     </div>
 
-                    <button id="btn-game-mode" class="pill-btn"
-                        title="Oyun FPS Koruması (Gereksiz animasyon ve video yükünü azaltır)">
+                    <button id="btn-game-mode" class="pill-btn" title="Oyun FPS Koruması">
                         <span>🎮</span><span id="game-mode-lbl" class="hide-md">Oyun Modu</span>
                     </button>
 
@@ -208,12 +231,12 @@
                     </div>
 
                     <button id="btn-pins" class="icon-btn" title="Sabitlenen Mesajlar">📌</button>
-                    <button id="btn-open-health-top" class="icon-btn" title="Bağlantı & Sistem Sağlığı">🩺</button>
+                    <button id="btn-open-health-top" class="icon-btn"
+                        title="Dinamik Zorlanma & Ölçek Paneli">🩺</button>
                     <button id="btn-mobile-right" class="icon-btn mobile-only" title="Üyeler">👥</button>
                 </div>
             </header>
 
-            <!-- AKTİF HAZIR KONTROLÜ (READY-CHECK) KOMPAKT ŞERİDİ -->
             <section id="ready-check-banner" class="floating-strip" style="display:none;">
                 <div class="rc-head">
                     <div class="rc-title-wrap">
@@ -231,7 +254,6 @@
                 <div id="rc-chips" class="rc-chips"></div>
             </section>
 
-            <!-- CANLI KAMERA VE EKRAN PAYLAŞIMI SAHNESİ -->
             <section id="media-stage">
                 <div class="stage-toolbar">
                     <span id="stage-count-lbl">Canlı Sahne</span>
@@ -244,7 +266,6 @@
                 <div id="stage-tiles"></div>
             </section>
 
-            <!-- ORTAK İZLEME (WATCH TOGETHER - YOUTUBE) SAHNESİ -->
             <section id="watch-stage" class="collab-stage" style="display:none;">
                 <div class="collab-hdr">
                     <div class="collab-title">
@@ -265,7 +286,6 @@
                 </div>
             </section>
 
-            <!-- ORTAK TAKTİK ÇİZİM TAHTASI -->
             <section id="board-stage" class="collab-stage" style="display:none;">
                 <div class="collab-hdr">
                     <div class="collab-title">
@@ -290,10 +310,8 @@
                 </div>
             </section>
 
-            <!-- MESAJ AKIŞI -->
             <div id="messages"></div>
 
-            <!-- MOBİL HIZLI SES/KAMERA ÇUBUĞU -->
             <div id="mobile-voice-bar">
                 <button id="m-btn-mute" class="v-act-btn">🎙️</button>
                 <button id="m-btn-deafen" class="v-act-btn">🎧</button>
@@ -302,23 +320,21 @@
                 <button id="m-btn-leave" class="btn xs danger">Ayrıl</button>
             </div>
 
-            <!-- YANIT & YAZIYOR ŞERİDİ -->
             <div id="reply-banner">
                 <span id="reply-text"></span>
                 <button id="btn-cancel-reply" class="icon-mini">✕</button>
             </div>
             <div id="typing-bar"></div>
 
-            <!-- MESAJ GÖNDERME FORMU -->
             <form id="chat-form">
-                <input type="file" id="img-input" accept="image/*" style="display:none;" />
+                <input type="file" id="img-input" accept="image/png,image/jpeg,image/webp,image/gif"
+                    style="display:none;" />
                 <button type="button" id="btn-img" class="icon-btn" title="Görsel Gönder">📷</button>
                 <input id="chat-input" placeholder="Mesaj yaz, @etiketle veya görsel yapıştır..." autocomplete="off" />
                 <button type="submit" class="btn primary sm-pad">Gönder</button>
             </form>
         </main>
 
-        <!-- SAĞ PANEL (ÜYELER & ROL HİYERARŞİSİ) -->
         <aside id="rightbar">
             <header class="right-hdr">
                 <span>ÜYELER <small id="online-count" class="count-pill">0</small></span>
@@ -328,22 +344,16 @@
         </aside>
     </div>
 
-    <!-- =================================================================== -->
-    <!-- ÖZEL BAĞLAM MENÜSÜ (KANAL & ÜYE SAĞ TIK MENÜSÜ)                     -->
-    <!-- =================================================================== -->
     <div id="context-menu" class="context-menu" role="menu"></div>
 
-    <!-- =================================================================== -->
-    <!-- SOUNDBOARD MİNİ PANELİ                                              -->
-    <!-- =================================================================== -->
+    <!-- SOUNDBOARD -->
     <div id="soundboard-modal" class="overlay">
         <div class="modal-box compact">
             <div class="modal-hdr">
                 <span>🔊 Ekip Soundboard</span>
                 <button class="icon-mini" data-close="soundboard-modal">✕</button>
             </div>
-            <p class="muted-note">Aktif ses kanalındaki herkese anında gider. Sesi ayarlamak için kaydırıcıyı kullan.
-            </p>
+            <p class="muted-note">Aktif ses kanalındaki herkese anında gider.</p>
             <div class="row-between">
                 <label class="field-lbl">Efekt Sesi: <span id="sb-vol-val">75%</span></label>
                 <input id="sb-vol-slider" type="range" min="0" max="100" value="75" class="mid-range" />
@@ -352,9 +362,7 @@
         </div>
     </div>
 
-    <!-- =================================================================== -->
-    <!-- SUNUCU OLUŞTUR / DAVETLE KATIL MODALI                               -->
-    <!-- =================================================================== -->
+    <!-- SUNUCU EKLE -->
     <div id="server-add-modal" class="overlay">
         <div class="modal-box compact">
             <div class="modal-hdr">
@@ -380,9 +388,7 @@
         </div>
     </div>
 
-    <!-- =================================================================== -->
-    <!-- KANAL OLUŞTUR / DÜZENLE MODALI                                      -->
-    <!-- =================================================================== -->
+    <!-- KANAL DÜZENLE / OLUŞTUR -->
     <div id="channel-modal" class="overlay">
         <div class="modal-box compact">
             <div class="modal-hdr">
@@ -413,9 +419,7 @@
         </div>
     </div>
 
-    <!-- =================================================================== -->
-    <!-- ÜYE ROLLERİNİ DÜZENLE MODALI                                        -->
-    <!-- =================================================================== -->
+    <!-- ÜYE ROLLERİ -->
     <div id="member-roles-modal" class="overlay">
         <div class="modal-box compact">
             <div class="modal-hdr">
@@ -433,9 +437,7 @@
         </div>
     </div>
 
-    <!-- =================================================================== -->
-    <!-- HIZLI ANKET MODALI                                                  -->
-    <!-- =================================================================== -->
+    <!-- HIZLI ANKET -->
     <div id="poll-modal" class="overlay">
         <div class="modal-box">
             <div class="modal-hdr">
@@ -458,9 +460,7 @@
         </div>
     </div>
 
-    <!-- =================================================================== -->
-    <!-- ORTAK İZLEME (YOUTUBE LİNKİ) MODALI                                 -->
-    <!-- =================================================================== -->
+    <!-- ORTAK İZLEME -->
     <div id="watch-modal" class="overlay">
         <div class="modal-box compact">
             <div class="modal-hdr">
@@ -479,9 +479,7 @@
         </div>
     </div>
 
-    <!-- =================================================================== -->
-    <!-- 1-1 FISILTI (DM) MODALI                                             -->
-    <!-- =================================================================== -->
+    <!-- 1-1 FISILTI (DM) -->
     <div id="dm-modal" class="overlay">
         <div class="modal-box wide dm-box">
             <div class="modal-hdr">
@@ -506,29 +504,48 @@
         </div>
     </div>
 
-    <!-- =================================================================== -->
-    <!-- BAĞLANTI & SİSTEM SAĞLIĞI MODALI                                    -->
-    <!-- =================================================================== -->
+    <!-- DİNAMİK ZORLANMA, ÖLÇEK & BAĞLANTI SAĞLIĞI PANELİ -->
     <div id="health-modal" class="overlay">
-        <div class="modal-box wide">
+        <div class="modal-box xwide">
             <div class="modal-hdr">
-                <span>🩺 Bağlantı & Sistem Sağlığı</span>
+                <span>🩺 Dinamik Zorlanma, Ölçek & Bağlantı Paneli</span>
                 <button class="icon-mini" data-close="health-modal">✕</button>
             </div>
+
+            <div class="card-block">
+                <div class="row-between wrap">
+                    <div>
+                        <div class="field-lbl">SUNUCU ZORLANMA SEVİYESİ</div>
+                        <div id="h-strain-level" style="font-size:17px; font-weight:700; color:var(--text-bright);">--
+                        </div>
+                    </div>
+                    <div style="text-align:right;">
+                        <span class="muted-inline">Zorlanma Skoru: </span>
+                        <strong id="h-strain-score">-- / 100</strong>
+                    </div>
+                </div>
+                <div class="mic-meter-bg tall">
+                    <div id="h-strain-bar" class="mic-meter-fill" style="width:0%;"></div>
+                </div>
+                <div id="h-scale-advice" class="muted-note">--</div>
+            </div>
+
             <div class="health-grid">
                 <div class="stat-card"><span class="stat-lbl">Sunucu Ping</span><span id="h-ping" class="stat-val">--
                         ms</span></div>
-                <div class="stat-card"><span class="stat-lbl">Uptime</span><span id="h-uptime"
-                        class="stat-val">--</span></div>
-                <div class="stat-card"><span class="stat-lbl">Sunucu RAM</span><span id="h-ram" class="stat-val">--
-                        MB</span></div>
-                <div class="stat-card"><span class="stat-lbl">Ses Motoru</span><span id="h-audio"
+                <div class="stat-card"><span class="stat-lbl">RAM Baskısı (512MB)</span><span id="h-ram"
+                        class="stat-val">-- MB</span></div>
+                <div class="stat-card"><span class="stat-lbl">Mesh Bağlantı</span><span id="h-mesh-links"
+                        class="stat-val">0</span></div>
+                <div class="stat-card"><span class="stat-lbl">CPU / DB Boyutu</span><span id="h-cpu-db"
                         class="stat-val">--</span></div>
             </div>
+
             <div class="stat-card">
                 <span class="stat-lbl">Aktif Cihaz & Medya Özeti</span>
                 <div id="h-local-summary" class="muted-note">Ses kanalında değilsin.</div>
             </div>
+
             <div class="table-scroll">
                 <table class="health-table">
                     <thead>
@@ -549,14 +566,12 @@
                     </tbody>
                 </table>
             </div>
-            <small class="muted-note">* P2P donan veya TURN gerektiren bir bağlantı için "Yenile" ile ICE yeniden
-                başlatılabilir.</small>
+            <small class="muted-note">* Ücretsiz/düşük maliyetli yükseltme eşiği: Tek ses odasında 8-10+ kişi veya 3+
+                eşzamanlı yayın açıldığında upload bant genişliği ve RAM baskısı artar.</small>
         </div>
     </div>
 
-    <!-- =================================================================== -->
-    <!-- AYARLAR, DSP, OVERLAY, SUNUCU & ROLLER MODALI                       -->
-    <!-- =================================================================== -->
+    <!-- AYARLAR -->
     <div id="settings-modal" class="overlay">
         <div class="modal-box xwide">
             <div class="modal-hdr">
@@ -572,7 +587,6 @@
                 <button class="tab-btn" data-tab="tab-db" id="tab-db-btn" style="display:none;">💾 Veritabanı</button>
             </div>
 
-            <!-- 1. SES & KAMERA -->
             <div id="tab-audio" class="tab-pane active">
                 <div class="grid-2">
                     <div class="field-col">
@@ -594,9 +608,9 @@
                         </select>
                     </div>
                     <div class="field-col">
-                        <label class="field-lbl">Kamera Kalitesi (10 kişi upload dostu)</label>
+                        <label class="field-lbl">Kamera Kalitesi</label>
                         <select id="cam-quality">
-                            <option value="360">360p — 15 FPS (Oyun / Mobil Dostu)</option>
+                            <option value="360">360p — 15 FPS (Yüksek Katılımcı Dostu)</option>
                             <option value="480" selected>480p — 24 FPS (Dengeli — Önerilen)</option>
                             <option value="720">720p — 30 FPS (HD)</option>
                         </select>
@@ -642,9 +656,7 @@
                 </div>
             </div>
 
-            <!-- 2. OYUN, OVERLAY, TEMA & PROFİL -->
             <div id="tab-overlay" class="tab-pane">
-                <!-- ELECTRON OVERLAY & GPU AYARLARI -->
                 <div id="electron-overlay-card" class="card-block" style="display:none;">
                     <div class="row-between">
                         <label class="check-row">
@@ -684,13 +696,8 @@
                         <input id="chk-disable-gpu" type="checkbox" checked />
                         <span>Overlay kapalıyken GPU Donanım Hızlandırmayı kapat (Oyun FPS Koruması)</span>
                     </label>
-                    <small class="muted-note">
-                        * Akıllı GPU Yönetimi: Overlay kapalıyken Electron ekran kartını oyuna bırakır. Overlay
-                        açıldığında yalnızca saydamlık için donanım kompozisyonu otomatik devreye girer.
-                    </small>
                 </div>
 
-                <!-- GÖRÜNÜM & AFK -->
                 <div class="card-block">
                     <div class="grid-3">
                         <div class="field-col">
@@ -722,13 +729,13 @@
                     </label>
                 </div>
 
-                <!-- PROFİL -->
                 <div class="card-block">
-                    <label class="field-lbl">Profilin (Görünür Ad, Avatar, Renk & Durum)</label>
+                    <label class="field-lbl">Profilin</label>
                     <div class="profile-edit-row">
                         <div class="avatar-upload-wrap">
                             <div id="prof-avatar-preview" class="avatar-circle lg">?</div>
-                            <input type="file" id="prof-avatar-file" accept="image/*" style="display:none;" />
+                            <input type="file" id="prof-avatar-file" accept="image/png,image/jpeg,image/webp,image/gif"
+                                style="display:none;" />
                             <div class="btn-row tight">
                                 <button type="button" id="btn-pick-avatar" class="btn xs secondary">Fotoğraf</button>
                                 <button type="button" id="btn-clear-avatar" class="btn xs secondary">Kaldır</button>
@@ -746,10 +753,22 @@
                             </div>
                         </div>
                     </div>
+
+                    <hr class="soft-hr" />
+                    <div class="row-between wrap">
+                        <div>
+                            <div class="field-lbl">Kişisel Kurtarma Kodu</div>
+                            <small class="muted-note">Şifreni unutursan bu kodla sıfırlayabilirsin. Yenilersen eski kod
+                                iptal olur.</small>
+                        </div>
+                        <button type="button" id="btn-regen-my-recovery" class="btn xs secondary">Yeni Kurtarma Kodu
+                            Üret</button>
+                    </div>
+                    <div id="my-recovery-display" class="db-box"
+                        style="display:none; font-weight:700; letter-spacing:1px;"></div>
                 </div>
             </div>
 
-            <!-- 3. SUNUCU AYARLARI & ÖZEL ROL HİYERARŞİSİ -->
             <div id="tab-server" class="tab-pane">
                 <div id="srv-general-section" class="card-block">
                     <label class="field-lbl">Sunucu Bilgileri & Davet Kodu</label>
@@ -799,10 +818,9 @@
                     </div>
                 </div>
 
-                <!-- ÖZEL ROL & YETKİ YÖNETİCİSİ -->
                 <div id="srv-roles-section" class="card-block">
                     <div class="row-between">
-                        <label class="field-lbl">Özel Roller & Hiyerarşi (Yüksek Öncelik Puanı Üsttedir)</label>
+                        <label class="field-lbl">Özel Roller & Hiyerarşi</label>
                         <button id="btn-new-role" class="btn xs primary">+ Yeni Rol</button>
                     </div>
                     <div class="roles-manager">
@@ -819,7 +837,7 @@
                                     <input id="edit-role-color" type="color" value="#5865f2" class="color-full" />
                                 </div>
                                 <div class="field-col">
-                                    <label class="field-lbl">Öncelik Puanı (1-999)</label>
+                                    <label class="field-lbl">Öncelik (1-999)</label>
                                     <input id="edit-role-priority" type="number" min="1" max="999" value="30" />
                                 </div>
                             </div>
@@ -852,12 +870,13 @@
                 </div>
             </div>
 
-            <!-- 4. YEREL MASTER VERİTABANI (GENEL YÖNETİCİ) -->
             <div id="tab-db" class="tab-pane">
                 <div class="card-block">
-                    <label class="field-lbl">Yerel PC Master Veritabanı & v4.0 → v5.0 Yedek Geri Yükleme</label>
+                    <label class="field-lbl">Yerel PC Master Veritabanı & Render Sıfırlama Koruması</label>
                     <div id="db-info" class="db-box">Tarayıcı modunda JSON indir/yükle butonlarını kullanabilirsin.
                     </div>
+                    <input id="db-backup-secret-inp" type="password"
+                        placeholder="BACKUP_SECRET (Render'da tanımlıysa boş sunucuya yüklemek için)" />
                     <div class="btn-row wrap">
                         <button id="btn-restore-pc-db" class="btn secondary">PC DB'yi Sunucuya Yükle</button>
                         <button id="btn-export-db" class="btn secondary">JSON İndir</button>
@@ -869,9 +888,7 @@
         </div>
     </div>
 
-    <!-- =================================================================== -->
-    <!-- EKRAN / PENCERE SEÇİCİ MODALI (Electron)                            -->
-    <!-- =================================================================== -->
+    <!-- EKRAN SEÇİCİ -->
     <div id="screen-modal" class="overlay">
         <div class="modal-box wide">
             <div class="modal-hdr">
@@ -897,9 +914,7 @@
         </div>
     </div>
 
-    <!-- =================================================================== -->
-    <!-- SABİTLENEN MESAJLAR                                                 -->
-    <!-- =================================================================== -->
+    <!-- SABİTLENEN MESAJLAR -->
     <div id="pins-modal" class="overlay">
         <div class="modal-box">
             <div class="modal-hdr">
@@ -910,12 +925,10 @@
         </div>
     </div>
 
-    <!-- RESİM BÜYÜTME -->
     <div id="lightbox" class="overlay">
         <img id="lightbox-img" src="" alt="Önizleme" />
     </div>
 
-    <!-- GİZLİ WEBRTC SES HAVUZU -->
     <div id="hidden-audio-sink" style="display:none;"></div>
 
     <script src="/socket.io/socket.io.js"></script>

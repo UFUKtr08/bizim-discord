@@ -58,15 +58,12 @@ function savePerfConfig(cfg) {
 
 let perfConfig = readPerfConfig();
 
-// Windows'ta saydam overlay penceresinin siyah kutu olmaması için:
-// Overlay etkinse GPU kompozisyonu açık bırakılır; overlay kapalıysa kullanıcının GPU kapatma tercihi uygulanır.
 const bootedWithoutGpu = perfConfig.disableGpu && !perfConfig.overlay.enabled;
 if (bootedWithoutGpu) {
     app.disableHardwareAcceleration();
     app.commandLine.appendSwitch("disable-gpu-compositing");
 }
 
-// Oyun arka planında ses/WebRTC/PTT gecikmesini önleyen Chromium bayrakları
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("disable-background-timer-throttling");
 app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
@@ -285,7 +282,6 @@ ipcMain.on("overlay-update-state", (_event, payload) => {
     syncOverlayVisibility();
 });
 
-// Yerel Master Veritabanı (atomik yazım korumalı)
 ipcMain.handle("db-save", async (_event, data) => {
     try {
         ensureLocalDBDir();
@@ -314,7 +310,6 @@ ipcMain.handle("db-load", async () => {
 
 ipcMain.handle("db-path", async () => LOCAL_DB_PATH);
 
-// Ekran / Pencere Paylaşımı
 ipcMain.handle("get-screen-sources", async () => {
     const sources = await desktopCapturer.getSources({
         types: ["screen", "window"],
@@ -360,10 +355,12 @@ function createWindow() {
 
     session.defaultSession.clearCache();
 
-    // Kamera, mikrofon ve ekran paylaşımı izinlerini otomatik onayla
-    session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    // İzinleri yalnızca güvenilir sunucu origin'i için onayla
+    session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => {
         const allowed = ["media", "mediaKeySystem", "fullscreen", "display-capture"];
-        callback(allowed.includes(permission));
+        const currentUrl = wc?.getURL() || "";
+        const trusted = currentUrl.startsWith(SERVER_URL);
+        callback(trusted && allowed.includes(permission));
     });
 
     mainWin.webContents.setWindowOpenHandler(({ url }) => {
@@ -403,7 +400,7 @@ function createWindow() {
     </style></head>
     <body>
       <div class="spinner"></div>
-      <h2>BizimDiscord v5.0 Başlatılıyor...</h2>
+      <h2>BizimDiscord v5.1 Başlatılıyor...</h2>
       <p>Sunucu uyku modundaysa uyanması 20-30 saniye sürebilir. Hazır olduğunda otomatik bağlanacak.</p>
       <div id="st" class="status">Sunucu kontrol ediliyor...</div>
     </body>
@@ -455,7 +452,6 @@ function createWindow() {
         createOverlayWindow();
     }
 
-    // Ekran çözünürlüğü değiştiğinde (oyuna girerken/çıkarken) overlay köşesini yeniden hizala
     screen.on("display-metrics-changed", positionOverlayWindow);
 
     globalShortcut.register("Alt+M", () => {

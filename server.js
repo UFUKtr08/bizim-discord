@@ -7,18 +7,22 @@ const crypto = require("crypto");
 
 const app = express();
 const server = http.createServer(app);
+
+const ALLOWED_ORIGIN = (process.env.ALLOWED_ORIGIN || "").trim();
 const io = new Server(server, {
-    maxHttpBufferSize: 8e6
+    maxHttpBufferSize: 2.5e6,
+    cors: ALLOWED_ORIGIN ? { origin: ALLOWED_ORIGIN, methods: ["GET", "POST"] } : undefined
 });
 
 const PORT = process.env.PORT || 3000;
 const DB_FILE = path.join(__dirname, "data.json");
 const SERVER_STARTED_AT = Date.now();
-const APP_VERSION = "5.0.0";
+const APP_VERSION = "5.1.0";
 
 const ENV_ADMIN_USER = (process.env.ADMIN_USER || "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "");
 const ENV_ADMIN_PASS = (process.env.ADMIN_PASS || "").trim();
 const ENV_DEFAULT_INVITE = (process.env.DEFAULT_INVITE_CODE || "").trim().toUpperCase();
+const BACKUP_SECRET = (process.env.BACKUP_SECRET || "").trim();
 
 const DEFAULT_ICE = [
     { urls: "stun:stun.l.google.com:19302" },
@@ -39,10 +43,21 @@ const PERMISSION_KEYS = [
 
 const ALLOWED_REACTIONS = ["👍", "😂", "🔥", "❤️", "👀", "🎯"];
 const USER_PALETTE = ["#5865f2", "#23a559", "#f0b232", "#eb459e", "#00a8fc", "#ed4245", "#1abc9c", "#e67e22"];
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 gün
+
+app.set("trust proxy", 1);
+
+// HTTP Güvenlik Başlıkları
+app.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("Permissions-Policy", "geolocation=(), payment=(), usb=()");
+    next();
+});
 
 app.use(express.static(path.join(__dirname, "public")));
 
-// PWA ve tarayıcı sekmesi için hafif SVG uygulama ikonu
 app.get("/icon.svg", (_req, res) => {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
@@ -60,13 +75,95 @@ app.get("/icon.svg", (_req, res) => {
     res.status(200).send(svg);
 });
 
-// =========================================================================
-// YARDIMCI FONKSİYONLAR
-// =========================================================================
+// Dışarıya yalnızca uyanış/sağlık sinyali döner (iç metrik sızdırmaz)
+app.get("/health", (_req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.status(200).json({ ok: true, version: APP_VERSION });
+});
 
-function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
-    const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+// =========================================================================
+// GÜVENLİK: IP LİMİTİ, RATE-LIMIT & KRİPTOGRAFİK YARDIMCILAR
+// =========================================================================
+const ipConnCount = new Map();
+const rateBuckets = new Map();
+
+function getClientIp(socket) {
+    const fwd = socket.handshake.headers["x-forwarded-for"];
+    if (typeof fwd === "string" && fwd.length > 0) {
+        return fwd.split(",")[0].trim().slice(0, 64);
+    }
+    return socket.handshake.address || "unknown";
+}
+
+function checkRateLimit(key, maxHits, windowMs) {
+    const now = Date.now();
+    const arr = rateBuckets.get(key) || [];
+    const fresh = arr.filter((ts) => now - ts < windowMs);
+    if (fresh.length >= maxHits) {
+        rateBuckets.set(key, fresh);
+        return false;
+    }
+    fresh.push(now);
+    rateBuckets.set(key, fresh);
+    return true;
+}
+
+setInterval(() => {
+    const now = Date.now();
+    for (const [k, arr] of rateBuckets.entries()) {
+        const fresh = arr.filter((ts) => now - ts < 120000);
+        if (fresh.length) rateBuckets.set(k, fresh);
+        else rateBuckets.delete(k);
+    }
+}, 60000);
+
+io.use((socket, next) => {
+    const ip = getClientIp(socket);
+    const cur = ipConnCount.get(ip) || 0;
+    if (cur >= 12) return next(new Error("Çok fazla eşzamanlı bağlantı."));
+    ipConnCount.set(ip, cur + 1);
+    socket.on("disconnect", () => {
+        const nextCount = (ipConnCount.get(ip) || 1) - 1;
+        if (nextCount <= 0) ipConnCount.delete(ip);
+        else ipConnCount.set(ip, nextCount);
+    });
+    next();
+});
+
+function hashSecret(secret, salt = crypto.randomBytes(16).toString("hex")) {
+    const hash = crypto.scryptSync(String(secret), salt, 64).toString("hex");
     return { salt, hash };
+}
+
+function safeEqualHex(aHex, bHex) {
+    if (!aHex || !bHex || typeof aHex !== "string" || typeof bHex !== "string") return false;
+    if (aHex.length !== bHex.length) return false;
+    try {
+        return crypto.timingSafeEqual(Buffer.from(aHex, "hex"), Buffer.from(bHex, "hex"));
+    } catch {
+        return false;
+    }
+}
+
+function generateRecoveryCode() {
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const bytes = crypto.randomBytes(12);
+    const parts = [];
+    for (let g = 0; g < 3; g++) {
+        let chunk = "";
+        for (let i = 0; i < 4; i++) {
+            chunk += alphabet[bytes[g * 4 + i] % alphabet.length];
+        }
+        parts.push(chunk);
+    }
+    return parts.join("-");
+}
+
+function normalizeRecoveryCodeInput(raw) {
+    return String(raw || "")
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, "");
 }
 
 function generateInviteCode(prefix = "BD") {
@@ -83,10 +180,15 @@ function sanitizeColor(color, fallback = "#5865f2") {
     return typeof color === "string" && /^#[0-9a-fA-F]{6}$/.test(color) ? color : fallback;
 }
 
+// XSS (SVG vb.) engellemek için yalnızca güvenli raster görsel formatlarına izin ver
+function isSafeRasterDataUrl(str, maxChars = 1800000) {
+    if (typeof str !== "string" || str.length === 0 || str.length > maxChars) return false;
+    return /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(str);
+}
+
 function sanitizeAvatar(avatar) {
     if (typeof avatar !== "string") return "";
-    if (!avatar.startsWith("data:image/")) return "";
-    if (avatar.length > 220000) return "";
+    if (!isSafeRasterDataUrl(avatar, 260000)) return "";
     return avatar;
 }
 
@@ -172,7 +274,7 @@ function createServerObject({ id, name, ownerId, inviteCode, turnServer, channel
     const msgs = {};
     if (messages && typeof messages === "object") {
         for (const [cid, arr] of Object.entries(messages)) {
-            if (Array.isArray(arr)) msgs[cid] = arr;
+            if (Array.isArray(arr)) msgs[cid] = arr.slice(-200);
         }
     }
     for (const ch of defaultChannels) {
@@ -228,7 +330,7 @@ function extractYouTubeId(rawUrl) {
 }
 
 // =========================================================================
-// VERİTABANI OLUŞTURMA & v4.0 -> v5.0 OTOMATİK MİGRASYON
+// VERİTABANI OLUŞTURMA & v4.0 -> v5.x OTOMATİK MİGRASYON
 // =========================================================================
 
 function createDefaultDB() {
@@ -259,10 +361,12 @@ function createDefaultDB() {
     };
 
     if (ENV_ADMIN_USER && ENV_ADMIN_PASS.length >= 4) {
-        const { salt, hash } = hashPassword(ENV_ADMIN_PASS);
+        const { salt, hash } = hashSecret(ENV_ADMIN_PASS);
         base.users[ENV_ADMIN_USER] = {
             salt,
             hash,
+            recoverySalt: null,
+            recoveryHash: null,
             role: "admin",
             isGlobalAdmin: true,
             displayName: ENV_ADMIN_USER,
@@ -281,8 +385,6 @@ function createDefaultDB() {
 }
 
 function migrateV4ToV5(raw) {
-    console.log("[Migration] v4.0 veritabanı algılandı, v5.0 çoklu sunucu formatına dönüştürülüyor...");
-
     const rawUsers = raw?.users && typeof raw.users === "object" ? raw.users : {};
     const rawSessions = raw?.sessions && typeof raw.sessions === "object" ? raw.sessions : {};
 
@@ -296,6 +398,8 @@ function migrateV4ToV5(raw) {
         users[uname] = {
             salt: u.salt,
             hash: u.hash,
+            recoverySalt: u.recoverySalt || null,
+            recoveryHash: u.recoveryHash || null,
             role: isOldAdmin ? "admin" : "user",
             isGlobalAdmin: isOldAdmin,
             displayName: typeof u.displayName === "string" && u.displayName.trim() ? u.displayName.trim().slice(0, 28) : uname,
@@ -321,7 +425,6 @@ function migrateV4ToV5(raw) {
         messages: raw?.messages && typeof raw.messages === "object" ? raw.messages : {}
     });
 
-    // Eski v4.0 kullanıcılarının tamamını ana sunucuya veri kaybı olmadan üye yap
     for (const [uname, u] of Object.entries(users)) {
         mainServer.members[uname] = {
             roleIds: u.isGlobalAdmin ? ["role-admin"] : ["role-member"],
@@ -424,10 +527,12 @@ function normalizeServer(srvId, rawSrv, validUsers) {
 
 function ensureEnvAdminAndIntegrity(dbObj) {
     if (ENV_ADMIN_USER && ENV_ADMIN_PASS.length >= 4 && !dbObj.users[ENV_ADMIN_USER]) {
-        const { salt, hash } = hashPassword(ENV_ADMIN_PASS);
+        const { salt, hash } = hashSecret(ENV_ADMIN_PASS);
         dbObj.users[ENV_ADMIN_USER] = {
             salt,
             hash,
+            recoverySalt: null,
+            recoveryHash: null,
             role: "admin",
             isGlobalAdmin: true,
             displayName: ENV_ADMIN_USER,
@@ -467,10 +572,23 @@ function ensureEnvAdminAndIntegrity(dbObj) {
     return dbObj;
 }
 
+function normalizeSessionEntry(entry, validUsers) {
+    const now = Date.now();
+    if (typeof entry === "string") {
+        if (!validUsers[entry]) return null;
+        return { username: entry, expiresAt: now + SESSION_TTL_MS };
+    }
+    if (entry && typeof entry === "object" && entry.username && validUsers[entry.username]) {
+        const exp = Number(entry.expiresAt) || (now + SESSION_TTL_MS);
+        if (exp <= now) return null;
+        return { username: entry.username, expiresAt: exp };
+    }
+    return null;
+}
+
 function normalizeDB(raw) {
     if (!raw || typeof raw !== "object") return createDefaultDB();
 
-    // v4.0 tespiti: `servers` yok ama eski format alanları var
     const isV4 = !raw.servers && (Array.isArray(raw.channels) || raw.settings || raw.users);
     if (isV4 && Number(raw.version || 4) < 5) {
         return migrateV4ToV5(raw);
@@ -484,6 +602,8 @@ function normalizeDB(raw) {
             users[uname] = {
                 salt: u.salt,
                 hash: u.hash,
+                recoverySalt: u.recoverySalt || null,
+                recoveryHash: u.recoveryHash || null,
                 role: isGlobal ? "admin" : "user",
                 isGlobalAdmin: isGlobal,
                 displayName: typeof u.displayName === "string" && u.displayName.trim() ? u.displayName.trim().slice(0, 28) : uname,
@@ -496,8 +616,9 @@ function normalizeDB(raw) {
 
     const sessions = {};
     if (raw.sessions && typeof raw.sessions === "object") {
-        for (const [tok, uname] of Object.entries(raw.sessions)) {
-            if (users[uname]) sessions[tok] = uname;
+        for (const [tok, entry] of Object.entries(raw.sessions)) {
+            const norm = normalizeSessionEntry(entry, users);
+            if (norm) sessions[tok] = norm;
         }
     }
 
@@ -555,10 +676,72 @@ function loadDB() {
 
 let db = loadDB();
 
-// Çevrimiçi kullanıcılar ve sunucu bazlı geçici çalışma verileri (Ready-Check, Watch Together, Çizim Tahtası)
-const activeUsers = new Map(); // socket.id -> runtime session
-const serverRuntime = new Map(); // serverId -> { readyCheck, watch, board }
-const soundboardCooldown = new Map(); // socket.id -> lastTimestamp
+// =========================================================================
+// ASENKRON + DEBOUNCED DB YAZIMI & GLOBAL ADMIN SENKRONİZASYONU
+// =========================================================================
+let saveTimer = null;
+let saveInFlight = false;
+let saveQueuedAgain = false;
+
+function emitDbSyncToGlobalAdmins() {
+    for (const [sid, au] of activeUsers.entries()) {
+        if (db.users[au.username]?.isGlobalAdmin) {
+            io.to(sid).emit("db-sync", db);
+        }
+    }
+}
+
+async function flushDBToDiskNow() {
+    if (saveInFlight) {
+        saveQueuedAgain = true;
+        return;
+    }
+    saveInFlight = true;
+    try {
+        const serialized = JSON.stringify(db, null, 2);
+        const tmpFile = DB_FILE + ".tmp";
+        await fs.promises.writeFile(tmpFile, serialized, "utf8");
+        try {
+            await fs.promises.rename(tmpFile, DB_FILE);
+        } catch {
+            await fs.promises.writeFile(DB_FILE, serialized, "utf8");
+        }
+    } catch (err) {
+        console.error("[DB Async Save Error]", err.message);
+    } finally {
+        saveInFlight = false;
+        if (saveQueuedAgain) {
+            saveQueuedAgain = false;
+            flushDBToDiskNow();
+        }
+    }
+}
+
+function saveAndSyncDB({ immediateDisk = false } = {}) {
+    emitDbSyncToGlobalAdmins();
+    if (immediateDisk) {
+        if (saveTimer) {
+            clearTimeout(saveTimer);
+            saveTimer = null;
+        }
+        flushDBToDiskNow();
+        return;
+    }
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+        saveTimer = null;
+        flushDBToDiskNow();
+    }, 900);
+}
+
+// =========================================================================
+// ÇALIŞMA DURUMU, YETKİ HİYERARŞİSİ & DİNAMİK ZORLANMA TELEMETRİSİ
+// =========================================================================
+const activeUsers = new Map();
+const serverRuntime = new Map();
+const soundboardCooldown = new Map();
+let lastCpuSample = process.cpuUsage();
+let lastCpuSampleTime = Date.now();
 
 function getRuntime(serverId) {
     if (!serverRuntime.has(serverId)) {
@@ -581,10 +764,6 @@ function getRuntime(serverId) {
     }
     return serverRuntime.get(serverId);
 }
-
-// =========================================================================
-// YETKİ & ROL HİYERARŞİSİ MOTORU
-// =========================================================================
 
 function getServerIceServers(srv) {
     const list = [...DEFAULT_ICE];
@@ -687,6 +866,19 @@ function isGlobalAdminSocket(socket) {
     return Boolean(u && db.users[u.username]?.isGlobalAdmin);
 }
 
+function inSameVoiceChannel(sidA, sidB) {
+    const a = activeUsers.get(sidA);
+    const b = activeUsers.get(sidB);
+    return Boolean(
+        a &&
+        b &&
+        a.voiceServerId &&
+        a.voiceServerId === b.voiceServerId &&
+        a.voiceChannel &&
+        a.voiceChannel === b.voiceChannel
+    );
+}
+
 function getUserServersList(username) {
     const list = [];
     for (const srv of Object.values(db.servers)) {
@@ -748,7 +940,6 @@ function buildServerMembersPayload(srv) {
         });
     }
 
-    // Sıralama: çevrimiçi üstte -> öncelik yüksek üstte -> alfabetik
     list.sort((a, b) => {
         if (a.online !== b.online) return a.online ? -1 : 1;
         if (a.power !== b.power) return b.power - a.power;
@@ -767,7 +958,8 @@ function buildServerPublicSettings(srv, includePrivate = false) {
         ownerId: srv.ownerId,
         afkChannelId: srv.afkChannelId || null,
         afkTimeoutSec: srv.afkTimeoutSec ?? 300,
-        iceServers: getServerIceServers(srv)
+        iceServers: getServerIceServers(srv),
+        hasTurnConfigured: Boolean(srv.turnServer?.url && srv.turnServer.url.trim())
     };
     if (includePrivate) {
         base.turnServer = { ...srv.turnServer };
@@ -797,31 +989,6 @@ function buildServerSnapshot(srv, username) {
         watch: rt.watch,
         board: rt.board
     };
-}
-
-// =========================================================================
-// VERİTABANI KAYIT, SENKRONİZASYON VE YAYIN
-// =========================================================================
-
-function saveAndSyncDB() {
-    try {
-        const serialized = JSON.stringify(db, null, 2);
-        const tmpFile = DB_FILE + ".tmp";
-        try {
-            fs.writeFileSync(tmpFile, serialized, "utf8");
-            fs.renameSync(tmpFile, DB_FILE);
-        } catch {
-            fs.writeFileSync(DB_FILE, serialized, "utf8");
-        }
-    } catch (err) {
-        console.error("[DB Save Error]", err.message);
-    }
-
-    for (const [sid, au] of activeUsers.entries()) {
-        if (db.users[au.username]?.isGlobalAdmin) {
-            io.to(sid).emit("db-sync", db);
-        }
-    }
 }
 
 function broadcastServerState(serverId) {
@@ -869,42 +1036,97 @@ function broadcastUserPresenceAcrossServers(username) {
     }
 }
 
-function getServerHealthSnapshot() {
+// Dinamik Zorlanma & Ölçeklendirme Telemetrisi (Render Free 512 MB & Mesh P2P)
+function computeDynamicLoadSnapshot() {
     const mem = process.memoryUsage();
+    const now = Date.now();
+    const cpuDelta = process.cpuUsage(lastCpuSample);
+    const elapsedUs = Math.max(1000, (now - lastCpuSampleTime) * 1000);
+    lastCpuSample = process.cpuUsage();
+    lastCpuSampleTime = now;
+
+    // Tek vCPU / event-loop bazlı yaklaşık CPU yüzdesi
+    const processCpuPct = Math.min(100, Math.round(((cpuDelta.user + cpuDelta.system) / elapsedUs) * 100));
+
+    // Ses odalarındaki en kalabalık odadaki kişi ve tahmini Mesh bağlantı sayısı: n*(n-1)
+    const roomCounts = new Map();
     let inVoice = 0;
     let camCount = 0;
     let screenCount = 0;
+
     for (const u of activeUsers.values()) {
-        if (u.voiceChannel) inVoice++;
+        if (u.voiceChannel) {
+            inVoice++;
+            const key = `${u.voiceServerId}:${u.voiceChannel}`;
+            roomCounts.set(key, (roomCounts.get(key) || 0) + 1);
+        }
         if (u.camOn) camCount++;
         if (u.screenSharing) screenCount++;
     }
+
+    let maxRoomVoice = 0;
+    let totalMeshLinks = 0;
+    for (const cnt of roomCounts.values()) {
+        if (cnt > maxRoomVoice) maxRoomVoice = cnt;
+        if (cnt > 1) totalMeshLinks += cnt * (cnt - 1);
+    }
+
+    const rssMB = Math.round(mem.rss / 1024 / 1024);
+    const renderFreeRamCapMB = 512;
+    const ramPct = Math.min(100, Math.round((rssMB / renderFreeRamCapMB) * 100));
+
+    let dbSizeKB = 0;
+    try {
+        dbSizeKB = Math.round(fs.statSync(DB_FILE).size / 1024);
+    } catch {
+        dbSizeKB = Math.round(Buffer.byteLength(JSON.stringify(db), "utf8") / 1024);
+    }
+
+    // Zorlanma skoru (0 - 100): Mesh yoğunluğu + RAM baskısı + CPU
+    const meshPressure = Math.min(45, Math.round((maxRoomVoice / 14) * 35 + (camCount + screenCount) * 4));
+    const ramPressure = Math.min(40, Math.round((ramPct / 100) * 40));
+    const cpuPressure = Math.min(25, Math.round(processCpuPct * 0.25));
+    const strainScore = Math.min(100, meshPressure + ramPressure + cpuPressure);
+
+    let level = "Rahat";
+    let recommendation = "Mevcut ücretsiz Render + Mesh yapısı bu yük için yeterli. Ek masrafa gerek yok.";
+
+    if (strainScore >= 75 || ramPct >= 82 || maxRoomVoice >= 11) {
+        level = "Kritik (Yükseltme Zamanı)";
+        recommendation = "Tek odada 11+ kişi veya %80+ RAM baskısı var. Ücretsiz/düşük maliyetli bir VPS (2 vCPU / 4 GB RAM) + LiveKit SFU ve PostgreSQL'e geçiş önerilir.";
+    } else if (strainScore >= 45 || ramPct >= 60 || maxRoomVoice >= 7) {
+        level = "Orta (Dikkat)";
+        recommendation = "Kamera/ekran paylaşımı artarsa upload veya RAM sınırına yaklaşılır. 360p/480p kamera, 720p30 ekran paylaşımı ve kalıcı PostgreSQL yedeği kullan.";
+    }
+
     return {
         ok: true,
         version: APP_VERSION,
-        time: Date.now(),
-        uptimeSec: Math.floor((Date.now() - SERVER_STARTED_AT) / 1000),
-        memRssMB: Math.round(mem.rss / 1024 / 1024),
+        time: now,
+        uptimeSec: Math.floor((now - SERVER_STARTED_AT) / 1000),
+        memRssMB: rssMB,
         memHeapMB: Math.round(mem.heapUsed / 1024 / 1024),
+        renderFreeRamCapMB,
+        ramPct,
+        processCpuPct,
+        dbSizeKB,
         onlineUsers: activeUsers.size,
         inVoice,
+        maxRoomVoice,
+        totalMeshLinks,
         camCount,
         screenCount,
         registeredUsers: Object.keys(db.users).length,
-        serverCount: Object.keys(db.servers).length
+        serverCount: Object.keys(db.servers).length,
+        strainScore,
+        level,
+        recommendation
     };
 }
-
-app.get("/health", (_req, res) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-    res.status(200).json(getServerHealthSnapshot());
-});
 
 // =========================================================================
 // SESLİ KANAL OTOMATİK AFK KORUMASI
 // =========================================================================
-
 function moveSocketToVoiceChannel(socketId, serverId, targetChannelId, reason = "afk") {
     const au = activeUsers.get(socketId);
     const srv = db.servers[serverId];
@@ -963,8 +1185,6 @@ setInterval(() => {
         const srv = db.servers[au.voiceServerId];
         if (!srv || !srv.afkChannelId || !srv.afkTimeoutSec || srv.afkTimeoutSec <= 0) continue;
         if (au.voiceChannel === srv.afkChannelId) continue;
-
-        // Kamera veya ekran paylaşımı aktifse otomatik AFK taşımayalım
         if (au.camOn || au.screenSharing) continue;
 
         const afkChannelExists = srv.channels.some((c) => c.id === srv.afkChannelId && c.type === "voice");
@@ -980,9 +1200,7 @@ setInterval(() => {
 // =========================================================================
 // OTURUM TAMAMLAMA
 // =========================================================================
-
 function completeUserSession(socket, username, record, tokenToReturn) {
-    // Aynı hesaptan eski bağlantıyı kapat
     for (const [oldId, u] of activeUsers.entries()) {
         if (u.username === username && oldId !== socket.id) {
             const oldVoiceSrv = u.voiceServerId;
@@ -996,7 +1214,6 @@ function completeUserSession(socket, username, record, tokenToReturn) {
         }
     }
 
-    // Kullanıcının hiç sunucusu yoksa varsayılan sunucuya ekle
     let userServers = getUserServersList(username);
     if (userServers.length === 0) {
         const defSrv = db.servers[db.globalSettings.defaultServerId] || Object.values(db.servers)[0];
@@ -1034,7 +1251,6 @@ function completeUserSession(socket, username, record, tokenToReturn) {
         lastVoiceActivityAt: Date.now()
     });
 
-    // Kullanıcının üyesi olduğu tüm sunucuların Socket.IO odalarına katıl
     for (const s of userServers) {
         socket.join("srv:" + s.id);
     }
@@ -1044,7 +1260,6 @@ function completeUserSession(socket, username, record, tokenToReturn) {
     }
 
     broadcastUserPresenceAcrossServers(username);
-
     const activeSrv = initialServerId ? db.servers[initialServerId] : null;
 
     return {
@@ -1058,7 +1273,8 @@ function completeUserSession(socket, username, record, tokenToReturn) {
             isGlobalAdmin: Boolean(record.isGlobalAdmin),
             color: record.color || "#5865f2",
             avatar: record.avatar || "",
-            status: record.status || "Çevrimiçi"
+            status: record.status || "Çevrimiçi",
+            hasRecoveryCode: Boolean(record.recoveryHash && record.recoverySalt)
         },
         servers: userServers,
         activeServerId: initialServerId,
@@ -1069,7 +1285,6 @@ function completeUserSession(socket, username, record, tokenToReturn) {
 // =========================================================================
 // SOCKET.IO OLAYLARI
 // =========================================================================
-
 io.on("connection", (socket) => {
     const defSrv = db.servers[db.globalSettings.defaultServerId] || Object.values(db.servers)[0];
 
@@ -1085,16 +1300,27 @@ io.on("connection", (socket) => {
     });
 
     socket.on("health-info", (cb) => {
-        if (typeof cb === "function") cb(getServerHealthSnapshot());
+        if (!activeUsers.get(socket.id)) return cb?.({ ok: false });
+        if (typeof cb === "function") cb(computeDynamicLoadSnapshot());
     });
 
-    // --- YEREL MASTER VERİTABANI SENKRONİZASYONU ---
+    // --- YEREL MASTER VERİTABANI SENKRONİZASYONU & RENDER SIFIRLANMA KORUMASI ---
     socket.on("check-db-needs-restore", (cb) => {
         const needs = Object.keys(db.users).length === 0 || Boolean(db.meta?.seededOnly);
-        if (typeof cb === "function") cb(needs);
+        if (typeof cb === "function") cb({
+            needsRestore: needs,
+            requiresSecret: Boolean(needs && BACKUP_SECRET)
+        });
     });
 
-    socket.on("restore-db", (incomingDB, cb) => {
+    socket.on("restore-db", (payload, cb) => {
+        if (!checkRateLimit("restore:" + getClientIp(socket), 5, 60000)) {
+            return cb?.({ ok: false, error: "Çok fazla geri yükleme denemesi. Bekleyin." });
+        }
+
+        const incomingDB = payload && payload.db ? payload.db : payload;
+        const providedSecret = String(payload?.backupSecret || incomingDB?._backupSecret || "").trim();
+
         if (!incomingDB || typeof incomingDB !== "object" || !incomingDB.users) {
             return cb?.({ ok: false, error: "Geçersiz veritabanı dosyası." });
         }
@@ -1106,14 +1332,19 @@ io.on("connection", (socket) => {
         if (!hasAdminInBackup) {
             return cb?.({ ok: false, error: "Yedek dosyasında yönetici hesabı bulunamadı." });
         }
+
         if (!serverNeedsRestore && !isGlobalAdminSocket(socket)) {
             return cb?.({ ok: false, error: "Dolu sunucuya geri yükleme için Genel Yönetici yetkisi gerekli." });
+        }
+
+        if (serverNeedsRestore && BACKUP_SECRET && providedSecret !== BACKUP_SECRET) {
+            return cb?.({ ok: false, error: "Boş sunucuya geri yükleme için BACKUP_SECRET anahtarı gerekli." });
         }
 
         const wasV4 = !incomingDB.servers;
         db = normalizeDB(incomingDB);
         db.meta.seededOnly = false;
-        saveAndSyncDB();
+        saveAndSyncDB({ immediateDisk: true });
 
         const newDefSrv = db.servers[db.globalSettings.defaultServerId] || Object.values(db.servers)[0];
         io.emit("server-info", {
@@ -1130,8 +1361,12 @@ io.on("connection", (socket) => {
         cb?.({ ok: true, migratedFromV4: wasV4 });
     });
 
-    // --- KİMLİK DOĞRULAMA ---
+    // --- KİMLİK DOĞRULAMA & KİŞİSEL KURTARMA KODU ---
     socket.on("register", ({ username, password, inviteCode }, cb) => {
+        if (!checkRateLimit("reg:" + getClientIp(socket), 5, 300000)) {
+            return cb?.({ ok: false, error: "Çok fazla kayıt denemesi. Lütfen birkaç dakika sonra tekrar deneyin." });
+        }
+
         const clean = (username || "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "").slice(0, 20);
         if (!clean || clean.length < 2) {
             return cb?.({ ok: false, error: "Kullanıcı adı en az 2 karakter (harf/rakam) olmalı." });
@@ -1146,7 +1381,6 @@ io.on("connection", (socket) => {
         const isFirstUser = Object.keys(db.users).length === 0;
         const cleanInvite = (inviteCode || "").trim().toUpperCase();
 
-        // Girilen davet kodu herhangi bir sunucuya ait mi?
         let targetServer = null;
         if (cleanInvite) {
             targetServer = Object.values(db.servers).find(
@@ -1166,11 +1400,17 @@ io.on("connection", (socket) => {
         }
 
         const color = USER_PALETTE[Math.floor(Math.random() * USER_PALETTE.length)];
-        const { salt, hash } = hashPassword(password);
+        const { salt, hash } = hashSecret(password);
+
+        // Kişisel Kurtarma Kodu üret ve hash'ini sakla
+        const recoveryCode = generateRecoveryCode();
+        const recHashObj = hashSecret(normalizeRecoveryCodeInput(recoveryCode));
 
         db.users[clean] = {
             salt,
             hash,
+            recoverySalt: recHashObj.salt,
+            recoveryHash: recHashObj.hash,
             role: isFirstUser ? "admin" : "user",
             isGlobalAdmin: isFirstUser,
             displayName: clean,
@@ -1193,22 +1433,31 @@ io.on("connection", (socket) => {
         }
 
         db.meta.seededOnly = false;
-        saveAndSyncDB();
-        cb?.({ ok: true, role: db.users[clean].role });
+        saveAndSyncDB({ immediateDisk: true });
+        cb?.({ ok: true, role: db.users[clean].role, recoveryCode });
     });
 
     socket.on("login", ({ username, password, remember }, cb) => {
+        if (!checkRateLimit("login:" + getClientIp(socket), 8, 60000)) {
+            return cb?.({ ok: false, error: "Çok fazla giriş denemesi. 1 dakika bekleyin." });
+        }
+
         const clean = (username || "").trim().toLowerCase();
         const record = db.users[clean];
-        if (!record) return cb?.({ ok: false, error: "Kullanıcı bulunamadı." });
+        if (!record) return cb?.({ ok: false, error: "Kullanıcı adı veya şifre hatalı." });
 
-        const { hash } = hashPassword(password, record.salt);
-        if (hash !== record.hash) return cb?.({ ok: false, error: "Şifre hatalı." });
+        const { hash } = hashSecret(password, record.salt);
+        if (!safeEqualHex(hash, record.hash)) {
+            return cb?.({ ok: false, error: "Kullanıcı adı veya şifre hatalı." });
+        }
 
         let token = null;
         if (remember) {
             token = crypto.randomBytes(24).toString("hex");
-            db.sessions[token] = clean;
+            db.sessions[token] = {
+                username: clean,
+                expiresAt: Date.now() + SESSION_TTL_MS
+            };
             saveAndSyncDB();
         }
 
@@ -1216,10 +1465,17 @@ io.on("connection", (socket) => {
     });
 
     socket.on("login-token", (token, cb) => {
-        const clean = token && db.sessions[token];
-        const record = clean && db.users[clean];
-        if (!clean || !record) return cb?.({ ok: false });
-        cb?.(completeUserSession(socket, clean, record, token));
+        const entry = token && db.sessions[token];
+        const norm = normalizeSessionEntry(entry, db.users);
+        if (!norm) {
+            if (token && db.sessions[token]) {
+                delete db.sessions[token];
+                saveAndSyncDB();
+            }
+            return cb?.({ ok: false });
+        }
+        const record = db.users[norm.username];
+        cb?.(completeUserSession(socket, norm.username, record, token));
     });
 
     socket.on("logout", (token) => {
@@ -1227,6 +1483,65 @@ io.on("connection", (socket) => {
             delete db.sessions[token];
             saveAndSyncDB();
         }
+    });
+
+    // Kişisel Kurtarma Kodu ile Şifre Sıfırlama
+    socket.on("reset-password-recovery", ({ username, recoveryCode, newPassword }, cb) => {
+        if (!checkRateLimit("recover:" + getClientIp(socket), 5, 300000)) {
+            return cb?.({ ok: false, error: "Çok fazla kurtarma denemesi. 5 dakika bekleyin." });
+        }
+
+        const clean = (username || "").trim().toLowerCase();
+        const cleanRec = normalizeRecoveryCodeInput(recoveryCode);
+        const record = db.users[clean];
+
+        if (!record || !record.recoveryHash || !record.recoverySalt || !cleanRec) {
+            return cb?.({ ok: false, error: "Kullanıcı adı veya kişisel kurtarma kodu hatalı." });
+        }
+        if (!newPassword || newPassword.length < 4) {
+            return cb?.({ ok: false, error: "Yeni şifre en az 4 karakter olmalı." });
+        }
+
+        const { hash: checkRecHash } = hashSecret(cleanRec, record.recoverySalt);
+        if (!safeEqualHex(checkRecHash, record.recoveryHash)) {
+            return cb?.({ ok: false, error: "Kullanıcı adı veya kişisel kurtarma kodu hatalı." });
+        }
+
+        const nextPass = hashSecret(newPassword);
+        record.salt = nextPass.salt;
+        record.hash = nextPass.hash;
+
+        // Güvenlik için yeni kişisel kurtarma kodu üret
+        const nextRecoveryCode = generateRecoveryCode();
+        const nextRec = hashSecret(normalizeRecoveryCodeInput(nextRecoveryCode));
+        record.recoverySalt = nextRec.salt;
+        record.recoveryHash = nextRec.hash;
+
+        // Eski oturum token'larını temizle
+        for (const [tok, sEntry] of Object.entries(db.sessions)) {
+            const sUser = typeof sEntry === "string" ? sEntry : sEntry?.username;
+            if (sUser === clean) delete db.sessions[tok];
+        }
+
+        saveAndSyncDB({ immediateDisk: true });
+        cb?.({
+            ok: true,
+            newRecoveryCode: nextRecoveryCode
+        });
+    });
+
+    // Mevcut kullanıcı kendi kişisel kurtarma kodunu yeniler (eski kod geçersiz olur)
+    socket.on("regenerate-recovery-code", (_payload, cb) => {
+        const user = activeUsers.get(socket.id);
+        const record = user && db.users[user.username];
+        if (!user || !record) return cb?.({ ok: false, error: "Oturum bulunamadı." });
+
+        const nextRecoveryCode = generateRecoveryCode();
+        const recObj = hashSecret(normalizeRecoveryCodeInput(nextRecoveryCode));
+        record.recoverySalt = recObj.salt;
+        record.recoveryHash = recObj.hash;
+        saveAndSyncDB({ immediateDisk: true });
+        cb?.({ ok: true, recoveryCode: nextRecoveryCode });
     });
 
     socket.on("update-profile", ({ displayName, color, status, avatar, afkExempt }, cb) => {
@@ -1319,6 +1634,10 @@ io.on("connection", (socket) => {
     });
 
     socket.on("server-join", ({ inviteCode }, cb) => {
+        if (!checkRateLimit("join:" + getClientIp(socket), 12, 60000)) {
+            return cb?.({ ok: false, error: "Çok fazla sunucu katılım denemesi. Bekleyin." });
+        }
+
         const user = activeUsers.get(socket.id);
         if (!user) return cb?.({ ok: false, error: "Oturum bulunamadı." });
 
@@ -1535,7 +1854,7 @@ io.on("connection", (socket) => {
         cb?.({ ok: true, inviteCode: srv.inviteCode });
     });
 
-    // --- KANAL YÖNETİMİ (SAĞ TIK MENÜSÜ CRUD) ---
+    // --- KANAL YÖNETİMİ ---
     socket.on("channel-create", ({ serverId, name, type, topic, isAfk }, cb) => {
         const user = activeUsers.get(socket.id);
         const srv = db.servers[serverId];
@@ -1759,7 +2078,6 @@ io.on("connection", (socket) => {
             return cb?.({ ok: false, error: "Üye sunucuda bulunamadı." });
         }
 
-        // Sunucu sahibi kendi etiket rollerini de güncelleyebilir; başkaları kendi seviyesine/üstüne dokunamaz
         const isSelfOwner = srv.ownerId === user.username && targetUsername === user.username;
         if (!isSelfOwner && !canActOnMember(srv, user.username, targetUsername)) {
             return cb?.({ ok: false, error: "Kendi yetki seviyenize eşit veya üstündeki bir üyenin rollerini değiştiremezsiniz." });
@@ -1771,7 +2089,6 @@ io.on("connection", (socket) => {
             (Array.isArray(roleIds) ? roleIds : []).filter((rid) => roleMap.has(rid))
         );
 
-        // Eklenen veya çıkarılan her rol aktörün kendi önceliğinden düşük olmalı
         const changedIds = new Set([...currentIds, ...nextIds]);
         for (const rid of changedIds) {
             const wasIn = currentIds.has(rid);
@@ -1799,7 +2116,7 @@ io.on("connection", (socket) => {
         cb?.({ ok: true });
     });
 
-    // --- MODERASYON (HİYERARŞİ KORUMALI) ---
+    // --- MODERASYON ---
     socket.on("member-kick", ({ serverId, targetUsername }, cb) => {
         const user = activeUsers.get(socket.id);
         const srv = db.servers[serverId];
@@ -1894,12 +2211,16 @@ io.on("connection", (socket) => {
         cb?.({ ok: true });
     });
 
-    // --- METİN SOHBETİ (SUNUCU BAZLI İZOLE) ---
+    // --- METİN SOHBETİ ---
     socket.on("chat-message", ({ serverId, channelId, text, image, replyTo }) => {
+        if (!checkRateLimit("msg:" + socket.id, 10, 5000)) return;
+
         const user = activeUsers.get(socket.id);
         const srv = db.servers[serverId];
         if (!user || !srv || !srv.members[user.username]) return;
-        if (!text?.trim() && !image) return;
+
+        const safeImage = isSafeRasterDataUrl(image, 1600000) ? image : null;
+        if (!text?.trim() && !safeImage) return;
 
         const ch = srv.channels.find((c) => c.id === channelId && c.type === "text");
         if (!ch) return;
@@ -1909,7 +2230,7 @@ io.on("connection", (socket) => {
             safeReply = {
                 id: String(replyTo.id || ""),
                 sender: String(replyTo.sender).slice(0, 28),
-                text: String(replyTo.text || "[Resim]").slice(0, 120)
+                text: String(replyTo.text || "[Görsel]").slice(0, 120)
             };
         }
 
@@ -1924,7 +2245,7 @@ io.on("connection", (socket) => {
             color: user.color,
             topRole: topRole ? { name: topRole.name, color: topRole.color } : null,
             text: (text || "").trim().slice(0, 2000),
-            image: typeof image === "string" && image.startsWith("data:image/") ? image : null,
+            image: safeImage,
             replyTo: safeReply,
             reactions: {},
             pinned: false,
@@ -2007,7 +2328,7 @@ io.on("connection", (socket) => {
         });
     });
 
-    // --- 1-1 FISILTI (DIRECT MESSAGES) ---
+    // --- 1-1 FISILTI (DM) ---
     socket.on("dm-list", (cb) => {
         const user = activeUsers.get(socket.id);
         if (!user) return cb?.([]);
@@ -2058,11 +2379,15 @@ io.on("connection", (socket) => {
     });
 
     socket.on("dm-send", ({ toUsername, text, image }, cb) => {
+        if (!checkRateLimit("dm:" + socket.id, 12, 5000)) {
+            return cb?.({ ok: false, error: "Çok hızlı mesaj gönderiyorsunuz." });
+        }
         const user = activeUsers.get(socket.id);
         if (!user || !toUsername || toUsername === user.username || !db.users[toUsername]) {
             return cb?.({ ok: false, error: "Alıcı bulunamadı." });
         }
-        if (!text?.trim() && !image) return cb?.({ ok: false });
+        const safeImage = isSafeRasterDataUrl(image, 1600000) ? image : null;
+        if (!text?.trim() && !safeImage) return cb?.({ ok: false });
 
         const key = dmKey(user.username, toUsername);
         const msg = {
@@ -2073,7 +2398,7 @@ io.on("connection", (socket) => {
             fromAvatar: user.avatar || "",
             to: toUsername,
             text: (text || "").trim().slice(0, 2000),
-            image: typeof image === "string" && image.startsWith("data:image/") ? image : null,
+            image: safeImage,
             time: new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }),
             ts: Date.now()
         };
@@ -2094,18 +2419,18 @@ io.on("connection", (socket) => {
         cb?.({ ok: true, message: msg });
     });
 
-    // --- SES & KAMERA KANALLARI (WEBRTC MESH) ---
+    // --- SES & KAMERA KANALLARI (ESNEK MESH — KATI 10 KİŞİ ENGELİ YOK) ---
     socket.on("join-voice", (payload, cb) => {
         const user = activeUsers.get(socket.id);
-        if (!user) return cb?.([]);
+        if (!user) return cb?.({ ok: false, error: "Oturum bulunamadı." });
 
         const serverId = typeof payload === "object" ? payload.serverId : user.activeServerId;
         const channelId = typeof payload === "object" ? payload.channelId : payload;
         const srv = db.servers[serverId];
-        if (!srv || !srv.members[user.username]) return cb?.([]);
+        if (!srv || !srv.members[user.username]) return cb?.({ ok: false, error: "Sunucu bulunamadı." });
 
         const ch = srv.channels.find((c) => c.id === channelId && c.type === "voice");
-        if (!ch) return cb?.([]);
+        if (!ch) return cb?.({ ok: false, error: "Ses kanalı bulunamadı." });
 
         const prevServerId = user.voiceServerId;
         const prevChannelId = user.voiceChannel;
@@ -2119,11 +2444,6 @@ io.on("connection", (socket) => {
             if (id !== socket.id && u.voiceServerId === serverId && u.voiceChannel === channelId) {
                 peersInChannel.push(id);
             }
-        }
-
-        // Maksimum 10 kişi Mesh koruması (9 peer + kendisi = 10)
-        if (peersInChannel.length >= 9) {
-            return cb?.({ ok: false, error: "Bu ses kanalında maksimum 10 kişi sınırı dolu.", peers: [] });
         }
 
         user.voiceServerId = serverId;
@@ -2200,14 +2520,17 @@ io.on("connection", (socket) => {
         if (user) user.lastVoiceActivityAt = Date.now();
     });
 
-    // --- WEBRTC SİNYALLEŞME ---
+    // --- WEBRTC SİNYALLEŞME (AYNI SES KANALI DOĞRULAMALI) ---
     socket.on("webrtc-offer", ({ to, offer }) => {
+        if (!to || !offer || !inSameVoiceChannel(socket.id, to)) return;
         io.to(to).emit("webrtc-offer", { from: socket.id, offer });
     });
     socket.on("webrtc-answer", ({ to, answer }) => {
+        if (!to || !answer || !inSameVoiceChannel(socket.id, to)) return;
         io.to(to).emit("webrtc-answer", { from: socket.id, answer });
     });
     socket.on("webrtc-ice", ({ to, candidate }) => {
+        if (!to || !candidate || !inSameVoiceChannel(socket.id, to)) return;
         io.to(to).emit("webrtc-ice", { from: socket.id, candidate });
     });
     socket.on("screen-share-stopped", () => {
@@ -2231,9 +2554,7 @@ io.on("connection", (socket) => {
         }
     });
 
-    // --- EKİP & OYUN ARAÇLARI (v4.5 PAKETİ) ---
-
-    // 1. Oyun Hazır Kontrolü (Ready-Check)
+    // --- EKİP & OYUN ARAÇLARI ---
     socket.on("ready-check-start", ({ serverId, title }, cb) => {
         const user = activeUsers.get(socket.id);
         const srv = db.servers[serverId];
@@ -2291,7 +2612,6 @@ io.on("connection", (socket) => {
         io.to("srv:" + serverId).emit("ready-check-update", { serverId, readyCheck: null, isNew: false });
     });
 
-    // 2. Hızlı Anket (Quick Poll)
     socket.on("poll-create", ({ serverId, question, options }, cb) => {
         const user = activeUsers.get(socket.id);
         const srv = db.servers[serverId];
@@ -2363,7 +2683,6 @@ io.on("connection", (socket) => {
         io.to("srv:" + serverId).emit("poll-update", { serverId, polls: srv.polls });
     });
 
-    // 3. Ortak İzleme (Watch Together — YouTube Senkron)
     socket.on("watch-start", ({ serverId, url, title }, cb) => {
         const user = activeUsers.get(socket.id);
         const srv = db.servers[serverId];
@@ -2427,7 +2746,6 @@ io.on("connection", (socket) => {
         io.to("srv:" + serverId).emit("watch-state", { serverId, watch: rt.watch });
     });
 
-    // 4. Özel Ekip Soundboard (Yalnızca aktif ses kanalındaki herkese gider)
     socket.on("soundboard-play", ({ soundId }) => {
         const user = activeUsers.get(socket.id);
         if (!user || !user.voiceServerId || !user.voiceChannel) return;
@@ -2452,7 +2770,6 @@ io.on("connection", (socket) => {
         }
     });
 
-    // 5. Ortak Taktik Çizim Tahtası (Normalize 0..1 Koordinatlı Canvas)
     socket.on("board-toggle", ({ serverId, active }) => {
         const user = activeUsers.get(socket.id);
         const srv = db.servers[serverId];
@@ -2463,6 +2780,7 @@ io.on("connection", (socket) => {
     });
 
     socket.on("board-stroke", ({ serverId, stroke }) => {
+        if (!checkRateLimit("board:" + socket.id, 45, 3000)) return;
         const user = activeUsers.get(socket.id);
         const srv = db.servers[serverId];
         if (!user || !srv || !srv.members[user.username] || !stroke) return;

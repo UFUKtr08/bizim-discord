@@ -1,18 +1,12 @@
 (() => {
     "use strict";
 
-    // =========================================================================
-    // PWA SERVICE WORKER KAYDI
-    // =========================================================================
     if ("serviceWorker" in navigator && !window.electronAPI) {
         window.addEventListener("load", () => {
             navigator.serviceWorker.register("/sw.js").catch(() => { });
         });
     }
 
-    // =========================================================================
-    // GLOBAL DURUM & SOCKET.IO
-    // =========================================================================
     const socket = io();
     const isElectron = Boolean(window.electronAPI && window.electronAPI.isElectron);
 
@@ -35,7 +29,6 @@
     let activeServerId = null;
     let activeChannelId = null;
 
-    // Aktif sunucu anlık verisi
     let serverSettings = null;
     let channels = [];
     let roles = [];
@@ -49,7 +42,6 @@
     let watchState = { active: false };
     let boardState = { active: false, strokes: [] };
 
-    // Aktif ses bağlantısı (Sunucu değişse de kopmaz)
     let voiceServerId = null;
     let voiceChannelId = null;
     let voiceIceServers = [
@@ -57,24 +49,20 @@
         { urls: "stun:stun1.l.google.com:19302" },
         { urls: "stun:stun2.l.google.com:19302" }
     ];
-    let voiceMembersCache = new Map(); // socketId -> member snapshot (overlay için)
+    let voiceMembersCache = new Map();
 
-    // Yerel DB önbelleği (Genel Yönetici için)
     let latestServerDB = null;
 
-    // Sohbet yardımcıları
     let replyTarget = null;
     let unreadChannels = new Set();
-    let typingUsers = new Map(); // channelId -> Map(username -> displayName)
+    let typingUsers = new Map();
     let typingTimeout = null;
     let isCurrentlyTyping = false;
 
-    // 1-1 Fısıltı (DM) durumu
     let dmConversations = [];
     let activeDmPeer = null;
     let dmUnread = false;
 
-    // WebRTC & Ses Motoru
     let sharedAudioCtx = null;
     let masterOutGain = null;
     let rawMicStream = null;
@@ -93,9 +81,9 @@
     let spotlightTileId = null;
     let selectedScreenSourceId = null;
 
-    const peers = new Map(); // socketId -> peer obj
-    const speakingMap = new Map(); // socketId -> boolean
-    const userVolumes = loadSavedVolumes(); // username -> 0..2
+    const peers = new Map();
+    const speakingMap = new Map();
+    const userVolumes = loadSavedVolumes();
 
     let selfMuted = false;
     let serverMuted = false;
@@ -119,22 +107,17 @@
     let lastVoiceActivitySent = 0;
     let lastOverlayHash = "";
     let overlayConfigCache = { enabled: false, position: "top-left", size: "md", needsRestart: false };
-    let pendingProfileAvatar = undefined; // undefined = değişmedi, "" = sil, "data:..." = yeni
+    let pendingProfileAvatar = undefined;
 
-    // YouTube Ortak İzleme
     let ytApiPromise = null;
     let ytPlayer = null;
     let ytPlayerVideoId = null;
     let suppressYtEventsUntil = 0;
 
-    // Taktik Çizim Tahtası
     let boardTool = "pen";
     let boardDrawing = false;
     let currentStrokePoints = [];
 
-    // =========================================================================
-    // DOM KISAYOLLARI & TEMEL YARDIMCILAR
-    // =========================================================================
     const $ = (id) => document.getElementById(id);
 
     function escapeHTML(str) {
@@ -276,7 +259,7 @@
     }
 
     // =========================================================================
-    // PAYLAŞIMLI AUDIOCONTEXT, BİLDİRİM TONLARI & SOUNDBOARD SENTETİZATÖRÜ
+    // PAYLAŞIMLI AUDIOCONTEXT, TONLAR & SOUNDBOARD
     // =========================================================================
     function ensureSharedAudioCtx() {
         if (!sharedAudioCtx) {
@@ -417,9 +400,6 @@
         } catch { }
     }
 
-    // =========================================================================
-    // OPUS SDP OPTİMİZASYONU (32kbps, DTX, FEC, minptime=10)
-    // =========================================================================
     function optimizeOpusSDP(sdp) {
         return sdp.replace(/a=fmtp:(\d+) (.+)/g, (match, pt, params) => {
             if (!sdp.includes(`a=rtpmap:${pt} opus/48000`)) return match;
@@ -433,7 +413,7 @@
     }
 
     // =========================================================================
-    // TERCİHLER, TEMA, OYUN MODU & ELECTRON OVERLAY AYARLARI
+    // TERCİHLER, TEMA, OYUN MODU & OVERLAY
     // =========================================================================
     function updateGameModeUI() {
         document.body.classList.toggle("game-mode", gameMode);
@@ -539,7 +519,6 @@
             return;
         }
 
-        // Aktif ses kanalındaki kullanıcıları derle (sunucu değiştirilse bile voiceMembersCache'ten beslenir)
         const list = [];
         for (const m of voiceMembersCache.values()) {
             const isMe = me && m.username === me.username;
@@ -560,7 +539,6 @@
             });
         }
 
-        // Konuşanları bozmadan sabit alfabetik sırada tut (listede sıçrama yapmasın)
         list.sort((a, b) => a.displayName.localeCompare(b.displayName, "tr"));
 
         const hash = list.map((u) => `${u.username}:${u.speaking ? 1 : 0}:${u.muted ? 1 : 0}:${u.displayName}:${u.color}:${u.avatar ? u.avatar.length : 0}`).join("|");
@@ -575,7 +553,7 @@
     }
 
     // =========================================================================
-    // BAĞLANTI & SİSTEM SAĞLIĞI (GETSTATS)
+    // DİNAMİK ZORLANMA, ÖLÇEK & BAĞLANTI SAĞLIĞI PANELİ
     // =========================================================================
     function updateHealthPill(ms) {
         if (typeof ms === "number") lastPingMs = ms;
@@ -609,12 +587,25 @@
     async function refreshHealthModal() {
         const t0 = Date.now();
         socket.emit("health-info", (info) => {
-            if (!info) return;
+            if (!info || !info.ok) return;
             const ms = Date.now() - t0;
             updateHealthPill(ms);
+
             $("h-ping").textContent = `${ms} ms`;
-            $("h-uptime").textContent = formatUptime(info.uptimeSec || 0);
-            $("h-ram").textContent = `${info.memRssMB} MB`;
+            $("h-ram").textContent = `${info.memRssMB} MB (${info.ramPct}%)`;
+            $("h-mesh-links").textContent = `${info.totalMeshLinks} (Odada maks ${info.maxRoomVoice})`;
+            $("h-cpu-db").textContent = `%${info.processCpuPct} / ${info.dbSizeKB} KB`;
+
+            const score = info.strainScore || 0;
+            $("h-strain-level").textContent = info.level || "Rahat";
+            $("h-strain-score").textContent = `${score} / 100`;
+            $("h-scale-advice").textContent = info.recommendation || "";
+
+            const bar = $("h-strain-bar");
+            bar.style.width = `${score}%`;
+            if (score >= 75) bar.style.background = "var(--danger)";
+            else if (score >= 45) bar.style.background = "var(--warning)";
+            else bar.style.background = "var(--success)";
         });
 
         $("h-audio").textContent = sharedAudioCtx ? sharedAudioCtx.state : "Hazır";
@@ -749,26 +740,35 @@
     // =========================================================================
     async function bootSequence() {
         if (isElectron) {
-            const needsRestore = await new Promise((resolve) => {
-                socket.emit("check-db-needs-restore", (need) => resolve(Boolean(need)));
+            const checkInfo = await new Promise((resolve) => {
+                socket.emit("check-db-needs-restore", (res) => {
+                    if (typeof res === "boolean") resolve({ needsRestore: res, requiresSecret: false });
+                    else resolve(res || { needsRestore: false, requiresSecret: false });
+                });
             });
-            if (needsRestore) {
+
+            if (checkInfo.needsRestore) {
                 const localDB = await window.electronAPI.dbLoad();
                 if (localDB && localDB.users) {
-                    await new Promise((resolve) => {
-                        socket.emit("restore-db", localDB, (res) => {
-                            if (res?.ok) {
-                                showToast(
-                                    res.migratedFromV4
-                                        ? "v4.0 yerel veritabanınız v5.0 formatına veri kaybı olmadan aktarıldı!"
-                                        : "Yerel PC veritabanı sunucuya otomatik geri yüklendi.",
-                                    "ok",
-                                    5000
-                                );
-                            }
-                            resolve();
+                    const savedSecret = localStorage.getItem("bd_backup_secret") || "";
+                    if (checkInfo.requiresSecret && !savedSecret) {
+                        showToast("Sunucu boş: Ayarlar → Veritabanı'ndan BACKUP_SECRET girip PC DB'yi yükleyebilirsin.", "info", 5500);
+                    } else {
+                        await new Promise((resolve) => {
+                            socket.emit("restore-db", { db: localDB, backupSecret: savedSecret }, (res) => {
+                                if (res?.ok) {
+                                    showToast(
+                                        res.migratedFromV4
+                                            ? "v4.0 yerel veritabanınız v5.x formatına veri kaybı olmadan aktarıldı!"
+                                            : "Yerel PC veritabanı sunucuya otomatik geri yüklendi.",
+                                        "ok",
+                                        5000
+                                    );
+                                }
+                                resolve();
+                            });
                         });
-                    });
+                    }
                 }
             }
         }
@@ -813,7 +813,6 @@
         renderServerRail();
         if (res.snapshot) applyServerSnapshot(res.snapshot);
 
-        // Kullanıcı AFK muafiyet tercihini sunucuya bildir
         if (afkExempt) {
             socket.emit("update-profile", { afkExempt: true });
         }
@@ -1028,7 +1027,6 @@
                 right.appendChild(dot);
             }
 
-            // Çarpı (x) butonu YOK; mobilde ve masaüstünde sağ tıka ek olarak zarif "⋯" bağlam menüsü
             const moreBtn = document.createElement("button");
             moreBtn.className = "ch-more-btn";
             moreBtn.title = "Kanal İşlemleri";
@@ -1043,7 +1041,6 @@
             li.appendChild(left);
             li.appendChild(right);
 
-            // Tıklama davranışı
             li.onclick = () => {
                 if (ch.type === "text") {
                     activeChannelId = ch.id;
@@ -1060,13 +1057,11 @@
                 }
             };
 
-            // Sağ tık menüsü
             li.oncontextmenu = (e) => {
                 e.preventDefault();
                 openChannelContextMenu(e.clientX, e.clientY, ch, canManageCh);
             };
 
-            // Mobil uzun basma (550ms) -> Bağlam menüsü
             let pressTimer = null;
             li.addEventListener("touchstart", (e) => {
                 const touch = e.touches[0];
@@ -1082,7 +1077,6 @@
             } else {
                 voiceUl.appendChild(li);
 
-                // Bu ses kanalındaki kullanıcıları listele
                 const occupants = members.filter((m) => m.online && m.voiceChannel === ch.id);
                 if (occupants.length) {
                     const occUl = document.createElement("ul");
@@ -1228,9 +1222,6 @@
         $("active-channel-topic").textContent = ch?.topic || "";
     }
 
-    // =========================================================================
-    // ÖZEL BAĞLAM MENÜSÜ MOTORU
-    // =========================================================================
     function openContextMenu(x, y, items) {
         const menu = $("context-menu");
         menu.innerHTML = "";
@@ -1276,7 +1267,7 @@
     });
 
     // =========================================================================
-    // ÜYE LİSTESİ (ROL HİYERARŞİSİ ETİKETLERİ & KİŞİ BAŞI %0-%200 SES)
+    // ÜYE LİSTESİ (ROL HİYERARŞİ ETİKETLERİ & KİŞİ BAŞI %0-%200 SES)
     // =========================================================================
     function renderMembers() {
         const ul = $("user-list");
@@ -1341,7 +1332,6 @@
 
                 info.appendChild(nameRow);
 
-                // Kişinin en yüksek yetkisi/rolü adının hemen altında zarif etiket olarak
                 if (m.topRole) {
                     const roleBadge = document.createElement("span");
                     roleBadge.className = "member-role-badge";
@@ -1373,7 +1363,6 @@
                 mainRow.appendChild(info);
                 li.appendChild(mainRow);
 
-                // Aynı ses kanalındaysak kişi başı %0 - %200 ses ayarı
                 const inSameVoice =
                     m.online &&
                     m.id &&
@@ -1503,7 +1492,7 @@
     }
 
     // =========================================================================
-    // ÜYE ROLLERİ MODALI & SUNUCU ROL YÖNETİCİSİ
+    // ÜYE ROLLERİ & SUNUCU ROL YÖNETİCİSİ
     // =========================================================================
     let editingMemberUsername = null;
 
@@ -1558,9 +1547,11 @@
         if (!serverSettings) return;
         $("adm-server-name").value = serverSettings.name || "";
         $("adm-invite-code").value = serverSettings.inviteCode || "";
-        $("adm-turn-url").value = serverSettings.turnServer?.url || "";
-        $("adm-turn-user").value = serverSettings.turnServer?.username || "";
-        $("adm-turn-pass").value = serverSettings.turnServer?.credential || "";
+        if (serverSettings.turnServer) {
+            $("adm-turn-url").value = serverSettings.turnServer.url || "";
+            $("adm-turn-user").value = serverSettings.turnServer.username || "";
+            $("adm-turn-pass").value = serverSettings.turnServer.credential || "";
+        }
 
         const afkSel = $("adm-afk-channel");
         afkSel.innerHTML = '<option value="">Devre Dışı</option>';
@@ -1645,7 +1636,7 @@
     }
 
     // =========================================================================
-    // METİN SOHBETİ (MESAJLAR, YANIT, REAKSİYON, SABİTLEME, ARAMA)
+    // METİN SOHBETİ
     // =========================================================================
     function formatMessageBody(text) {
         let safe = escapeHTML(text);
@@ -1732,7 +1723,6 @@
             body.appendChild(img);
         }
 
-        // Reaksiyonlar
         if (msg.reactions && Object.keys(msg.reactions).length) {
             const rWrap = document.createElement("div");
             rWrap.className = "msg-reactions";
@@ -1755,7 +1745,6 @@
             body.appendChild(rWrap);
         }
 
-        // Hover aksiyon çubuğu
         const actions = document.createElement("div");
         actions.className = "msg-actions";
 
@@ -1861,7 +1850,7 @@
         $("reply-banner").classList.remove("show");
     }
 
-    function compressImageFile(file, maxW = 1280, quality = 0.82) {
+    function compressImageFile(file, maxW = 1280, quality = 0.8) {
         return new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = () => {
@@ -1890,7 +1879,7 @@
     async function sendChatImage(file) {
         if (!activeServerId || !activeChannelId) return;
         try {
-            const dataUrl = await compressImageFile(file, 1280, 0.82);
+            const dataUrl = await compressImageFile(file, 1280, 0.8);
             socket.emit("chat-message", {
                 serverId: activeServerId,
                 channelId: activeChannelId,
@@ -1906,7 +1895,7 @@
     }
 
     // =========================================================================
-    // SES DSP ZİNCİRİ (85Hz HPF, NOISE GATE, COMPRESSOR, GAIN, NS/AEC/AGC)
+    // SES DSP ZİNCİRİ
     // =========================================================================
     async function loadMediaDevices() {
         if (!navigator.mediaDevices?.enumerateDevices) return;
@@ -2086,7 +2075,6 @@
         const micBuf = new Uint8Array(128);
         const peerBuf = new Uint8Array(64);
 
-        // 1. Düşük-CPU Noise Gate + AFK aktivite + kendi konuşma tespiti (45ms)
         dspLoopTimer = setInterval(() => {
             if (!micAnalyserNode || !noiseGateNode || !sharedAudioCtx) return;
 
@@ -2120,7 +2108,6 @@
             const amSpeaking = !effMuted && (gateThreshold > 0 ? gateOpen : pct > 8);
             setSpeakingState(socket.id, amSpeaking);
 
-            // AFK zamanlayıcısını sıfırlamak için 15 saniyede bir ses aktivite sinyali
             if (amSpeaking && now - lastVoiceActivitySent > 15000) {
                 lastVoiceActivitySent = now;
                 socket.emit("voice-activity");
@@ -2133,7 +2120,6 @@
             }
         }, 45);
 
-        // 2. Karşı taraf konuşma algılama + Overlay güncelleme (110ms)
         visualLoopTimer = setInterval(() => {
             for (const [peerId, peer] of peers.entries()) {
                 let speaking = false;
@@ -2188,7 +2174,7 @@
     }
 
     // =========================================================================
-    // CANLI VIDEO SAHNESİ (UYARLANABİLİR IZGARA + SPOTLIGHT)
+    // CANLI VIDEO SAHNESİ
     // =========================================================================
     function updateStageLayout() {
         const stage = $("media-stage");
@@ -2234,7 +2220,7 @@
             const video = document.createElement("video");
             video.autoplay = true;
             video.playsInline = true;
-            video.muted = true; // Sesler Web Audio API üzerinden yönetilir
+            video.muted = true;
             if (kind === "cam") video.classList.add("cover");
             if (isLocal && kind === "cam" && mirrorCam) video.classList.add("mirrored");
 
@@ -2267,7 +2253,7 @@
     }
 
     // =========================================================================
-    // WEBRTC MESH (PERFECT NEGOTIATION, BITRATE KONTROLÜ, PLAYOUTDELAY=0)
+    // WEBRTC MESH
     // =========================================================================
     function getCamConstraints() {
         const q = parseInt($("cam-quality").value, 10) || 480;
@@ -2506,6 +2492,9 @@
             renderChannels();
 
             const peerIds = Array.isArray(res.peers) ? res.peers : [];
+            if (peerIds.length >= 7) {
+                showToast(`Odada ${peerIds.length + 1} kişi var: Kamera/yayın açarken ping ve CPU'yu Dinamik Panelden takip et.`, "info", 4200);
+            }
             for (const pid of peerIds) {
                 await sendOfferToPeer(pid);
             }
@@ -2546,7 +2535,6 @@
         pushOverlayState(true);
     }
 
-    // --- KAMERA AÇ / KAPAT / ÇEVİR ---
     function updateCamButtonsUI(on) {
         $("btn-cam").classList.toggle("on", on);
         $("m-btn-cam").classList.toggle("on", on);
@@ -2627,7 +2615,6 @@
         if (!silent) socket.emit("cam-stopped");
     }
 
-    // --- EKRAN PAYLAŞIMI (ELECTRON GÖRSEL PENCERE SEÇİCİ + WEB FALLBACK) ---
     async function openScreenShareFlow() {
         if (!voiceChannelId) return showToast("Ekran paylaşmak için önce bir ses kanalına katıl.", "info");
         if (screenStream) return stopScreenShare();
@@ -2677,7 +2664,7 @@
                 },
                 audio: withAudio
             });
-        } catch (err) {
+        } catch {
             showToast("Ekran paylaşımı başlatılamadı.", "err");
             return;
         }
@@ -2720,10 +2707,8 @@
     }
 
     // =========================================================================
-    // EKİP & OYUN ARAÇLARI (READY-CHECK, ANKET, WATCH TOGETHER, SOUNDBOARD, BOARD, DM)
+    // EKİP & OYUN ARAÇLARI
     // =========================================================================
-
-    // 1. HAZIR KONTROLÜ (READY-CHECK)
     function renderReadyCheckBanner() {
         const banner = $("ready-check-banner");
         if (!activeReadyCheck) {
@@ -2752,7 +2737,6 @@
         });
     }
 
-    // 2. HIZLI ANKET
     function renderPollsList() {
         const container = $("polls-list");
         container.innerHTML = "";
@@ -2802,7 +2786,6 @@
         });
     }
 
-    // 3. ORTAK İZLEME (YOUTUBE IFRAME API SENKRON)
     function loadYouTubeAPI() {
         if (window.YT && window.YT.Player) return Promise.resolve();
         if (ytApiPromise) return ytApiPromise;
@@ -2880,7 +2863,6 @@
             return;
         }
 
-        // Mevcut oynatıcıda zaman ve durum eşitle
         try {
             suppressYtEventsUntil = Date.now() + 1200;
             const cur = typeof ytPlayer.getCurrentTime === "function" ? ytPlayer.getCurrentTime() : 0;
@@ -2892,7 +2874,6 @@
         } catch { }
     }
 
-    // 4. SOUNDBOARD PANELİ
     function initSoundboardGrid() {
         const grid = $("soundboard-grid");
         grid.innerHTML = "";
@@ -2912,7 +2893,6 @@
         });
     }
 
-    // 5. ORTAK TAKTİK ÇİZİM TAHTASI
     function resizeBoardCanvas() {
         const canvas = $("tactic-canvas");
         const wrap = canvas?.parentElement;
@@ -3047,7 +3027,6 @@
         });
     }
 
-    // 6. 1-1 FISILTI (DM)
     function openDmModal() {
         dmUnread = false;
         renderServerRail();
@@ -3144,8 +3123,12 @@
         if (tabId === "tab-server") populateServerSettingsForm();
     }
 
+    function showGeneratedRecoveryCode(code) {
+        $("recovery-code-val").textContent = code;
+        $("recovery-code-box").style.display = "flex";
+    }
+
     function bindAllUIEvents() {
-        // Modal kapatma butonları ve backdrop
         document.querySelectorAll("[data-close]").forEach((btn) => {
             btn.onclick = () => closeModal(btn.getAttribute("data-close"));
         });
@@ -3154,6 +3137,63 @@
         $("btn-mobile-left").onclick = () => toggleDrawer("left");
         $("btn-mobile-right").onclick = () => toggleDrawer("right");
         $("btn-mobile-right-close").onclick = closeDrawers;
+
+        // Auth sekmeleri (Giriş/Kayıt <-> Kişisel Kurtarma Kodu)
+        $("auth-tab-login").onclick = () => {
+            $("auth-tab-login").classList.add("active");
+            $("auth-tab-recover").classList.remove("active");
+            $("auth-pane-login").classList.add("active");
+            $("auth-pane-recover").classList.remove("active");
+            $("auth-err").textContent = "";
+        };
+
+        $("auth-tab-recover").onclick = () => {
+            $("auth-tab-recover").classList.add("active");
+            $("auth-tab-login").classList.remove("active");
+            $("auth-pane-recover").classList.add("active");
+            $("auth-pane-login").classList.remove("active");
+            $("auth-err").textContent = "";
+        };
+
+        $("btn-copy-rec-code").onclick = () => {
+            const val = $("recovery-code-val").textContent.trim();
+            if (val) copyText(val, "Kişisel kurtarma kodu kopyalandı.");
+        };
+
+        $("btn-dismiss-rec-code").onclick = () => {
+            $("recovery-code-box").style.display = "none";
+            $("recovery-code-val").textContent = "";
+        };
+
+        $("btn-do-recover").onclick = () => {
+            const username = $("rec-user").value.trim();
+            const recoveryCode = $("rec-code").value.trim();
+            const newPassword = $("rec-new-pass").value;
+            $("auth-err").textContent = "";
+
+            socket.emit("reset-password-recovery", { username, recoveryCode, newPassword }, (res) => {
+                if (!res?.ok) {
+                    $("auth-err").textContent = res?.error || "Kurtarma başarısız.";
+                    return;
+                }
+                $("rec-code").value = "";
+                $("rec-new-pass").value = "";
+                $("auth-user").value = username;
+                $("auth-pass").value = "";
+                $("auth-tab-login").click();
+                showGeneratedRecoveryCode(res.newRecoveryCode);
+                showToast("Şifren yenilendi! Yeni kurtarma kodunu kaydet.", "ok", 5000);
+            });
+        };
+
+        $("btn-regen-my-recovery").onclick = () => {
+            socket.emit("regenerate-recovery-code", {}, (res) => {
+                if (!res?.ok) return showToast(res?.error || "Kod üretilemedi.", "err");
+                $("my-recovery-display").style.display = "block";
+                $("my-recovery-display").textContent = `Yeni Kurtarma Kodun: ${res.recoveryCode}`;
+                copyText(res.recoveryCode, "Yeni kurtarma kodu üretildi ve kopyalandı.");
+            });
+        };
 
         // Ayarlar sekmeleri
         document.querySelectorAll("#settings-modal .tab-btn").forEach((btn) => {
@@ -3198,8 +3238,10 @@
                     }
                     $("auth-err").textContent = res?.error || "Kayıt başarısız.";
                 } else {
-                    showToast("Hesap oluşturuldu, giriş yapılıyor...", "ok");
-                    doLogin();
+                    if (res.recoveryCode) {
+                        showGeneratedRecoveryCode(res.recoveryCode);
+                    }
+                    showToast("Hesap oluşturuldu! Kurtarma kodunu kaydettikten sonra giriş yapabilirsin.", "ok", 5000);
                 }
             });
         };
@@ -3213,7 +3255,7 @@
             location.reload();
         };
 
-        // Sunucu Şeridi & Başlık Butonları
+        // Sunucu Şeridi & Başlık
         $("btn-dm-rail").onclick = openDmModal;
         $("btn-add-server").onclick = () => {
             $("join-server-code").value = "";
@@ -3260,7 +3302,6 @@
             });
         };
 
-        // Hızlı Kanal Oluştur / Düzenle
         $("btn-quick-add-text").onclick = () => openChannelModal(null, "text");
         $("btn-quick-add-voice").onclick = () => openChannelModal(null, "voice");
         $("ch-modal-type").onchange = () => {
@@ -3299,7 +3340,6 @@
             }
         };
 
-        // Üye Rollerini Kaydet
         $("btn-save-member-roles").onclick = () => {
             if (!editingMemberUsername) return;
             const checkedIds = Array.from(document.querySelectorAll("#mr-roles-list input[type='checkbox']:checked")).map((c) => c.value);
@@ -3317,7 +3357,6 @@
             });
         };
 
-        // Sunucu Ayarları & Rol Editörü
         $("btn-copy-invite").onclick = () => {
             const code = $("adm-invite-code").value.trim();
             if (code) copyText(code, `Davet kodu kopyalandı: ${code}`);
@@ -3404,7 +3443,6 @@
             });
         };
 
-        // Topbar & Araçlar Popover
         $("btn-tools-menu").onclick = (e) => {
             e.stopPropagation();
             $("tools-popover").classList.toggle("show");
@@ -3464,7 +3502,6 @@
 
         $("search-input").oninput = renderMessages;
 
-        // Hazır Kontrolü aksiyonları
         document.querySelectorAll("[data-rc-status]").forEach((btn) => {
             btn.onclick = () => {
                 if (!activeReadyCheck) return;
@@ -3477,7 +3514,6 @@
         });
         $("btn-rc-close").onclick = () => socket.emit("ready-check-close", { serverId: activeServerId });
 
-        // Hızlı Anket oluşturma
         $("btn-create-poll").onclick = () => {
             const question = $("poll-question").value.trim();
             const options = Array.from(document.querySelectorAll(".poll-opt-inp")).map((i) => i.value.trim()).filter(Boolean);
@@ -3493,7 +3529,6 @@
             });
         };
 
-        // Ortak İzleme (YouTube)
         $("btn-start-watch").onclick = () => {
             const url = $("watch-url-input").value.trim();
             const title = $("watch-title-input").value.trim();
@@ -3521,14 +3556,12 @@
         $("btn-watch-change").onclick = () => openModal("watch-modal");
         $("btn-watch-stop").onclick = () => socket.emit("watch-stop", { serverId: activeServerId });
 
-        // Soundboard ses düzeyi
         $("sb-vol-slider").oninput = () => {
             soundboardVolume = parseInt($("sb-vol-slider").value, 10);
             $("sb-vol-val").textContent = `${soundboardVolume}%`;
             localStorage.setItem("bd_sb_vol", String(soundboardVolume));
         };
 
-        // Taktik Çizim Tahtası araçları
         document.querySelectorAll("[data-btool]").forEach((btn) => {
             btn.onclick = () => {
                 boardTool = btn.dataset.btool;
@@ -3539,7 +3572,6 @@
         $("btn-board-clear").onclick = () => socket.emit("board-clear", { serverId: activeServerId });
         $("btn-board-close").onclick = () => socket.emit("board-toggle", { serverId: activeServerId, active: false });
 
-        // 1-1 Fısıltı gönderme
         $("dm-form").onsubmit = (e) => {
             e.preventDefault();
             if (!activeDmPeer) return;
@@ -3551,7 +3583,6 @@
             });
         };
 
-        // Sohbet formu & resim yapıştırma
         $("btn-cancel-reply").onclick = clearReply;
         $("btn-img").onclick = () => $("img-input").click();
         $("img-input").onchange = (e) => {
@@ -3600,7 +3631,6 @@
             }
         };
 
-        // Ses & Sahne kontrolleri
         $("btn-mute").onclick = toggleMute;
         $("m-btn-mute").onclick = toggleMute;
         $("btn-deafen").onclick = toggleDeafen;
@@ -3622,7 +3652,6 @@
             $("btn-expand-stage").textContent = expanded ? "Küçült" : "Genişlet";
         };
 
-        // Ses DSP & Cihaz Kontrolleri
         $("mic-select").onchange = () => { if (voiceChannelId) buildMicPipeline().catch(() => { }); };
         $("spk-select").onchange = applyOutputDevice;
         $("cam-select").onchange = () => { if (camStream) restartCameraTrack(); };
@@ -3664,7 +3693,6 @@
             $("btn-ptt-key").textContent = "Tuşa bas...";
         };
 
-        // Tema, Overlay & GPU Ayarları
         $("theme-select").onchange = () => {
             const t = $("theme-select").value;
             localStorage.setItem("bd_theme", t);
@@ -3700,7 +3728,6 @@
             };
         }
 
-        // Profil fotoğrafı & Profil kaydet
         $("btn-pick-avatar").onclick = () => $("prof-avatar-file").click();
         $("prof-avatar-file").onchange = async (e) => {
             const file = e.target.files?.[0];
@@ -3748,16 +3775,21 @@
             });
         };
 
-        // Yerel PC DB & JSON İndir / Yükle
+        $("db-backup-secret-inp").oninput = () => {
+            localStorage.setItem("bd_backup_secret", $("db-backup-secret-inp").value.trim());
+        };
+        $("db-backup-secret-inp").value = localStorage.getItem("bd_backup_secret") || "";
+
         $("btn-restore-pc-db").onclick = async () => {
             if (!isElectron) return showToast("Bu özellik masaüstü (Electron) sürümünde çalışır.", "info");
             const data = await window.electronAPI.dbLoad();
             if (!data) return showToast("Bilgisayarda kayıtlı DB dosyası bulunamadı.", "err");
-            socket.emit("restore-db", data, (res) => {
+            const secret = $("db-backup-secret-inp").value.trim();
+            socket.emit("restore-db", { db: data, backupSecret: secret }, (res) => {
                 if (res?.ok) {
                     showToast(
                         res.migratedFromV4
-                            ? "v4.0 PC veritabanı v5.0'a dönüştürülerek yüklendi!"
+                            ? "v4.0 PC veritabanı v5.x'e dönüştürülerek yüklendi!"
                             : "PC veritabanı sunucuya yüklendi!",
                         "ok"
                     );
@@ -3786,11 +3818,12 @@
             reader.onload = () => {
                 try {
                     const parsed = JSON.parse(reader.result);
-                    socket.emit("restore-db", parsed, (res) => {
+                    const secret = $("db-backup-secret-inp").value.trim();
+                    socket.emit("restore-db", { db: parsed, backupSecret: secret }, (res) => {
                         if (res?.ok) {
                             showToast(
                                 res.migratedFromV4
-                                    ? "v4.0 JSON yedeği v5.0 formatına dönüştürülerek geri yüklendi!"
+                                    ? "v4.0 JSON yedeği v5.x formatına dönüştürülerek geri yüklendi!"
                                     : "JSON veritabanı geri yüklendi!",
                                 "ok"
                             );
@@ -3806,7 +3839,6 @@
             e.target.value = "";
         };
 
-        // Klavye & PTT & Arka Plan Optimizasyonu
         window.addEventListener("keydown", (e) => {
             if (awaitingPttKey) {
                 e.preventDefault();
@@ -3889,7 +3921,6 @@
     socket.on("server-state-update", (state) => {
         if (!state) return;
 
-        // Ses bağlı olduğumuz sunucunun güncel üye verilerini overlay için daima taze tut
         if (state.serverId === voiceServerId) {
             if (state.settings?.iceServers) voiceIceServers = state.settings.iceServers;
             refreshVoiceMembersCacheFrom(state.members || []);
@@ -3946,7 +3977,6 @@
         location.reload();
     });
 
-    // Sohbet Olayları
     socket.on("chat-message", (msg) => {
         if (!msg || msg.serverId !== activeServerId) return;
         if (!messagesByChannel[msg.channelId]) messagesByChannel[msg.channelId] = [];
@@ -3997,7 +4027,6 @@
         }
     });
 
-    // 1-1 Fısıltı
     socket.on("dm-message", (msg) => {
         if (!msg || !me) return;
         const other = msg.from === me.username ? msg.to : msg.from;
@@ -4020,7 +4049,6 @@
         }
     });
 
-    // Ses & WebRTC Olayları
     socket.on("voice-event", ({ type, serverId, channelId }) => {
         if (serverId === voiceServerId && channelId === voiceChannelId) {
             playTone(type === "join" ? 720 : 420, 0.06, "sine", 0.05);
@@ -4073,7 +4101,6 @@
     socket.on("screen-share-stopped", (peerId) => removeMediaTile("screen-" + peerId));
     socket.on("cam-stopped", (peerId) => removeMediaTile("cam-" + peerId));
 
-    // Perfect Negotiation Sinyalleşme
     socket.on("webrtc-offer", async ({ from, offer }) => {
         if (!voiceChannelId) return;
         const peer = getOrCreatePeer(from);
@@ -4113,7 +4140,6 @@
         }
     });
 
-    // Ekip & Oyun Araçları Olayları
     socket.on("ready-check-update", ({ serverId, readyCheck, isNew }) => {
         if (serverId !== activeServerId) return;
         activeReadyCheck = readyCheck;
@@ -4158,9 +4184,6 @@
         }
     });
 
-    // =========================================================================
-    // BAŞLATMA
-    // =========================================================================
     applyPreferences();
     initSoundboardGrid();
     initTacticBoardEvents();
