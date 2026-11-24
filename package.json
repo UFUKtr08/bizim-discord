@@ -1,25 +1,35 @@
 {
   "name": "bizim-discord",
-  "version": "1.0.0",
+  "version": "3.0.0",
   "main": "electron-main.js",
   "scripts": {
     "server": "node server.js",
     "app": "electron .",
-    "build-exe": "electron-builder --win portable"
+    "build-exe": "electron-builder --win nsis"
   },
   "dependencies": {
     "express": "^4.21.0",
     "socket.io": "^4.8.0"
   },
   "devDependencies": {
-    "electron": "^33.4.11",
+    "electron": "^33.0.0",
     "electron-builder": "^25.1.8"
   },
   "build": {
-    "appId": "com.bizim.discord",
+    "appId": "com.bizim.discord.app",
     "productName": "BizimDiscord",
+    "files": [
+      "electron-main.js",
+      "preload.js",
+      "package.json"
+    ],
     "win": {
-      "target": "portable"
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true
     }
   }
 }
