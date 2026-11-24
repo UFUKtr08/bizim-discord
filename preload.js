@@ -6,5 +6,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     dbLoad: () => ipcRenderer.invoke("db-load"),
     dbPath: () => ipcRenderer.invoke("db-path"),
     getScreenSources: () => ipcRenderer.invoke("get-screen-sources"),
-    selectScreenSource: (opts) => ipcRenderer.invoke("select-screen-source", opts)
+    selectScreenSource: (opts) => ipcRenderer.invoke("select-screen-source", opts),
+    getGpuMode: () => ipcRenderer.invoke("get-gpu-mode"),
+    setGpuMode: (disableGpu) => ipcRenderer.invoke("set-gpu-mode", disableGpu),
+    onGlobalShortcut: (cb) => ipcRenderer.on("global-shortcut", (_e, action) => cb(action))
 });

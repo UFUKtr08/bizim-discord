@@ -1,23 +1,49 @@
-const { app, BrowserWindow, session, desktopCapturer, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, session, desktopCapturer, ipcMain, shell, globalShortcut } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
 // =========================================================================
 // ALDIĞIN RENDER LİNKİNİ AŞAĞIDAKİ TIRNAK İÇİNE YAPIŞTIR (Sonunda / olmasın)
-// Yerelde test ederken: "http://localhost:3000"
 // =========================================================================
 const SERVER_URL = process.env.SERVER_URL || "https://bizim-discord.onrender.com";
+
+// Oyun Performansı: Varsayılan olarak GPU hızlandırmayı kapat (FPS/G-Sync koruması)
+const PERF_CFG_PATH = path.join(app.getPath("userData"), "perf-config.json");
+function readPerfConfig() {
+    try {
+        if (fs.existsSync(PERF_CFG_PATH)) return JSON.parse(fs.readFileSync(PERF_CFG_PATH, "utf8"));
+    } catch { }
+    return { disableGpu: true };
+}
+
+const perfConfig = readPerfConfig();
+if (perfConfig.disableGpu) {
+    app.disableHardwareAcceleration();
+    app.commandLine.appendSwitch("disable-gpu-compositing");
+}
+
+// Tam ekran oyundayken Windows'un WebRTC ses akışını yavaşlatmasını engelle
+app.commandLine.appendSwitch("disable-renderer-backgrounding");
+app.commandLine.appendSwitch("disable-background-timer-throttling");
+app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
 
 const DB_DIR = path.join(app.getPath("documents"), "BizimDiscord_DB");
 const LOCAL_DB_PATH = path.join(DB_DIR, "bizim_discord_db.json");
 
+let mainWin = null;
 let pendingScreenChoice = { sourceId: null, withAudio: false };
 
 function ensureLocalDBDir() {
     if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
 }
 
-// --- PC YEREL VERİTABANI IPC ---
+ipcMain.handle("get-gpu-mode", async () => perfConfig.disableGpu);
+ipcMain.handle("set-gpu-mode", async (_event, disableGpu) => {
+    fs.writeFileSync(PERF_CFG_PATH, JSON.stringify({ disableGpu: !!disableGpu }, null, 2), "utf8");
+    app.relaunch();
+    app.exit(0);
+});
+
 ipcMain.handle("db-save", async (_event, data) => {
     try {
         ensureLocalDBDir();
@@ -39,11 +65,10 @@ ipcMain.handle("db-load", async () => {
 
 ipcMain.handle("db-path", async () => LOCAL_DB_PATH);
 
-// --- GÖRSEL EKRAN / PENCERE SEÇİCİ IPC ---
 ipcMain.handle("get-screen-sources", async () => {
     const sources = await desktopCapturer.getSources({
         types: ["screen", "window"],
-        thumbnailSize: { width: 320, height: 180 }
+        thumbnailSize: { width: 280, height: 158 }
     });
     return sources.map((s) => ({
         id: s.id,
@@ -62,11 +87,11 @@ ipcMain.handle("select-screen-source", async (_event, opts) => {
 });
 
 function createWindow() {
-    const win = new BrowserWindow({
-        width: 1280,
-        height: 820,
-        minWidth: 960,
-        minHeight: 640,
+    mainWin = new BrowserWindow({
+        width: 1260,
+        height: 810,
+        minWidth: 940,
+        minHeight: 620,
         title: "BizimDiscord",
         autoHideMenuBar: true,
         backgroundColor: "#1e1f22",
@@ -77,18 +102,15 @@ function createWindow() {
         }
     });
 
-    // Her açılışta güncel arayüzü çekmek için önbelleği temizle
     session.defaultSession.clearCache();
 
-    // Sohbetteki linklere tıklandığında sistemin varsayılan tarayıcısında aç
-    win.webContents.setWindowOpenHandler(({ url }) => {
+    mainWin.webContents.setWindowOpenHandler(({ url }) => {
         if (url.startsWith("http://") || url.startsWith("https://")) {
             shell.openExternal(url);
         }
         return { action: "deny" };
     });
 
-    // Seçilen pencere/ekranı ve isteğe bağlı Windows sistem sesini paylaş
     session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
         try {
             const sources = await desktopCapturer.getSources({ types: ["screen", "window"] });
@@ -104,19 +126,18 @@ function createWindow() {
         }
     });
 
-    // Render uyandırma ekranı
     const wakeUpHTML = `
     <!DOCTYPE html>
     <html lang="tr">
     <head><meta charset="UTF-8"><style>
       body { background:#1e1f22; color:#dbdee1; font-family:'Segoe UI',system-ui,sans-serif; display:flex;
              flex-direction:column; align-items:center; justify-content:center; height:100vh; margin:0; }
-      .spinner { width:46px; height:46px; border:4px solid #3f4147; border-top-color:#5865f2;
-                 border-radius:50%; animation:spin 0.9s linear infinite; margin-bottom:20px; }
+      .spinner { width:44px; height:44px; border:4px solid #3f4147; border-top-color:#5865f2;
+                 border-radius:50%; animation:spin 0.9s linear infinite; margin-bottom:18px; }
       @keyframes spin { to { transform: rotate(360deg); } }
       h2 { color:#fff; margin:0 0 8px; }
       p { color:#949ba4; font-size:14px; text-align:center; max-width:380px; line-height:1.5; }
-      .status { margin-top:14px; font-size:12px; color:#5865f2; font-weight:600; }
+      .status { margin-top:12px; font-size:12px; color:#5865f2; font-weight:600; }
     </style></head>
     <body>
       <div class="spinner"></div>
@@ -141,10 +162,19 @@ function createWindow() {
     </html>
   `;
 
-    win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(wakeUpHTML));
+    mainWin.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(wakeUpHTML));
+
+    // Tam ekran oyundan Alt+Tab yapmadan çalışan global kısayollar
+    globalShortcut.register("Alt+M", () => {
+        mainWin?.webContents.send("global-shortcut", "toggle-mute");
+    });
+    globalShortcut.register("Alt+D", () => {
+        mainWin?.webContents.send("global-shortcut", "toggle-deafen");
+    });
 }
 
 app.whenReady().then(createWindow);
+app.on("will-quit", () => globalShortcut.unregisterAll());
 app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();
 });

@@ -1,6 +1,8 @@
 {
   "name": "bizim-discord",
-  "version": "3.0.0",
+  "version": "3.5.0",
+  "description": "Oyun odakli dusuk gecikmeli sesli ve metin sohbet uygulamasi",
+  "author": "UFUKtr08",
   "main": "electron-main.js",
   "scripts": {
     "server": "node server.js",
@@ -24,7 +26,8 @@
       "package.json"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": true,

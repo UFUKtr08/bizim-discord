@@ -8,11 +8,16 @@ const crypto = require("crypto");
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-    maxHttpBufferSize: 6e6 // Resim paylaşımı ve DB senkronizasyonu için 6 MB
+    maxHttpBufferSize: 6e6
 });
 
 const PORT = process.env.PORT || 3000;
 const DB_FILE = path.join(__dirname, "data.json");
+
+// Render Environment kısmına ADMIN_USER ve ADMIN_PASS girersen
+// sunucu sıfırlansa bile Admin hesabın kalıcı olarak korunur.
+const ENV_ADMIN_USER = (process.env.ADMIN_USER || "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "");
+const ENV_ADMIN_PASS = (process.env.ADMIN_PASS || "").trim();
 
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -26,40 +31,76 @@ const DEFAULT_ICE = [
     { urls: "stun:stun2.l.google.com:19302" }
 ];
 
+function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+    const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+    return { salt, hash };
+}
+
 function createDefaultDB() {
-    return {
+    const base = {
         users: {},
+        sessions: {},
         channels: [
             { id: "genel", name: "genel-sohbet", type: "text", topic: "Herkese açık ana sohbet kanalı" },
-            { id: "medya", name: "medya-ve-linkler", type: "text", topic: "Ekran görüntüleri, oyun klipleri ve linkler" },
+            { id: "medya", name: "medya-ve-linkler", type: "text", topic: "Ekran görüntüleri, klipler ve linkler" },
             { id: "ses-1", name: "Ana Ses Odası", type: "voice", topic: "" },
-            { id: "ses-2", name: "Yayın / Oyun Odası", type: "voice", topic: "" }
+            { id: "ses-2", name: "Oyun / Yayın Odası", type: "voice", topic: "" }
         ],
         messages: { genel: [], medya: [] },
         settings: {
             serverName: "BizimDiscord",
-            inviteCode: "",
+            inviteCode: (process.env.DEFAULT_INVITE_CODE || "").trim(),
             turnServer: { url: "", username: "", credential: "" }
-        }
+        },
+        meta: { seededOnly: true }
     };
+
+    if (ENV_ADMIN_USER && ENV_ADMIN_PASS.length >= 4) {
+        const { salt, hash } = hashPassword(ENV_ADMIN_PASS);
+        base.users[ENV_ADMIN_USER] = {
+            salt,
+            hash,
+            role: "admin",
+            color: "#5865f2",
+            status: "Çevrimiçi"
+        };
+    }
+    return base;
 }
 
 function normalizeDB(raw) {
     const def = createDefaultDB();
-    return {
+    const normalized = {
         users: raw?.users && typeof raw.users === "object" ? raw.users : {},
+        sessions: raw?.sessions && typeof raw.sessions === "object" ? raw.sessions : {},
         channels: Array.isArray(raw?.channels) && raw.channels.length ? raw.channels : def.channels,
         messages: raw?.messages && typeof raw.messages === "object" ? raw.messages : def.messages,
         settings: {
             serverName: raw?.settings?.serverName || def.settings.serverName,
-            inviteCode: raw?.settings?.inviteCode || "",
+            inviteCode: raw?.settings?.inviteCode ?? def.settings.inviteCode,
             turnServer: {
                 url: raw?.settings?.turnServer?.url || "",
                 username: raw?.settings?.turnServer?.username || "",
                 credential: raw?.settings?.turnServer?.credential || ""
             }
+        },
+        meta: {
+            seededOnly: Boolean(raw?.meta?.seededOnly)
         }
     };
+
+    // Ortam değişkenindeki Admin her zaman mevcut ve yetkili olsun
+    if (ENV_ADMIN_USER && ENV_ADMIN_PASS.length >= 4 && !normalized.users[ENV_ADMIN_USER]) {
+        const { salt, hash } = hashPassword(ENV_ADMIN_PASS);
+        normalized.users[ENV_ADMIN_USER] = {
+            salt,
+            hash,
+            role: "admin",
+            color: "#5865f2",
+            status: "Çevrimiçi"
+        };
+    }
+    return normalized;
 }
 
 function loadDB() {
@@ -76,7 +117,7 @@ function loadDB() {
 }
 
 let db = loadDB();
-const activeUsers = new Map(); // socket.id -> state
+const activeUsers = new Map();
 
 function getPublicIceServers() {
     const list = [...DEFAULT_ICE];
@@ -107,11 +148,6 @@ function saveAndSyncDB() {
     }
 }
 
-function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
-    const hash = crypto.scryptSync(password, salt, 64).toString("hex");
-    return { salt, hash };
-}
-
 function broadcastState() {
     const list = Array.from(activeUsers.entries()).map(([id, u]) => ({
         id,
@@ -136,8 +172,50 @@ function isAdmin(socket) {
     return activeUsers.get(socket.id)?.role === "admin";
 }
 
+function completeUserSession(socket, clean, record, tokenToReturn) {
+    for (const [oldId, u] of activeUsers.entries()) {
+        if (u.username === clean && oldId !== socket.id) {
+            io.to(oldId).emit("kicked", "Hesabınıza başka bir cihazdan giriş yapıldı.");
+            io.sockets.sockets.get(oldId)?.disconnect(true);
+            activeUsers.delete(oldId);
+        }
+    }
+
+    activeUsers.set(socket.id, {
+        username: clean,
+        role: record.role,
+        color: record.color || "#5865f2",
+        status: record.status || "Çevrimiçi",
+        voiceChannel: null,
+        serverMuted: false,
+        selfMuted: false,
+        deafened: false,
+        screenSharing: false
+    });
+
+    if (record.role === "admin") {
+        socket.emit("db-sync", db);
+    }
+    broadcastState();
+
+    return {
+        ok: true,
+        token: tokenToReturn || null,
+        me: {
+            id: socket.id,
+            username: clean,
+            role: record.role,
+            color: record.color || "#5865f2",
+            status: record.status || "Çevrimiçi"
+        },
+        channels: db.channels,
+        messages: db.messages,
+        settings: getPublicSettings(),
+        adminSettings: record.role === "admin" ? db.settings : null
+    };
+}
+
 io.on("connection", (socket) => {
-    // Başlangıç bilgisi (Sunucu adı ve davet kodu gerekiyor mu)
     socket.emit("server-info", {
         serverName: db.settings.serverName,
         hasInviteCode: Boolean(db.settings.inviteCode),
@@ -148,23 +226,27 @@ io.on("connection", (socket) => {
         if (typeof cb === "function") cb();
     });
 
-    socket.on("check-db-empty", (cb) => {
-        if (typeof cb === "function") cb(Object.keys(db.users).length === 0);
+    // Sunucu sıfırdan/boş uyandıysa Admin PC'sindeki yedeği otomatik kabul et
+    socket.on("check-db-needs-restore", (cb) => {
+        const needs = Object.keys(db.users).length === 0 || Boolean(db.meta?.seededOnly);
+        if (typeof cb === "function") cb(needs);
     });
 
     socket.on("restore-db", (incomingDB, cb) => {
         if (!incomingDB || typeof incomingDB !== "object" || !incomingDB.users) {
             return cb?.({ ok: false, error: "Geçersiz veritabanı dosyası." });
         }
-        const serverIsEmpty = Object.keys(db.users).length === 0;
+        const serverNeedsRestore = Object.keys(db.users).length === 0 || Boolean(db.meta?.seededOnly);
         const hasAdminInBackup = Object.values(incomingDB.users).some((u) => u?.role === "admin");
         if (!hasAdminInBackup) {
             return cb?.({ ok: false, error: "Yedek dosyasında admin hesabı bulunamadı." });
         }
-        if (!serverIsEmpty && !isAdmin(socket)) {
+        if (!serverNeedsRestore && !isAdmin(socket)) {
             return cb?.({ ok: false, error: "Dolu sunucuya geri yükleme için Admin yetkisi gerekli." });
         }
+
         db = normalizeDB(incomingDB);
+        db.meta.seededOnly = false;
         fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
         io.emit("server-info", {
             serverName: db.settings.serverName,
@@ -175,7 +257,7 @@ io.on("connection", (socket) => {
         cb?.({ ok: true });
     });
 
-    // 1. KAYIT OLMA (Davet Kodu Destekli)
+    // 1. KAYIT OLMA
     socket.on("register", ({ username, password, inviteCode }, cb) => {
         const clean = (username || "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "").slice(0, 20);
         if (!clean || clean.length < 2) {
@@ -202,12 +284,13 @@ io.on("connection", (socket) => {
             color,
             status: "Çevrimiçi"
         };
+        db.meta.seededOnly = false;
         saveAndSyncDB();
         cb({ ok: true, role: db.users[clean].role });
     });
 
-    // 2. GİRİŞ YAPMA (Çift oturum korumalı)
-    socket.on("login", ({ username, password }, cb) => {
+    // 2. GİRİŞ YAPMA & OTURUM HATIRLAMA
+    socket.on("login", ({ username, password, remember }, cb) => {
         const clean = (username || "").trim().toLowerCase();
         const record = db.users[clean];
         if (!record) return cb({ ok: false, error: "Kullanıcı bulunamadı." });
@@ -215,49 +298,31 @@ io.on("connection", (socket) => {
         const { hash } = hashPassword(password, record.salt);
         if (hash !== record.hash) return cb({ ok: false, error: "Şifre hatalı." });
 
-        // Aynı hesap başka sekmede/cihazda açıksa eski oturumu kapat
-        for (const [oldId, u] of activeUsers.entries()) {
-            if (u.username === clean && oldId !== socket.id) {
-                io.to(oldId).emit("kicked", "Hesabınıza başka bir cihazdan giriş yapıldı.");
-                io.sockets.sockets.get(oldId)?.disconnect(true);
-                activeUsers.delete(oldId);
-            }
+        let token = null;
+        if (remember) {
+            token = crypto.randomBytes(24).toString("hex");
+            db.sessions[token] = clean;
+            saveAndSyncDB();
         }
 
-        activeUsers.set(socket.id, {
-            username: clean,
-            role: record.role,
-            color: record.color || "#5865f2",
-            status: record.status || "Çevrimiçi",
-            voiceChannel: null,
-            serverMuted: false,
-            selfMuted: false,
-            deafened: false,
-            screenSharing: false
-        });
-
-        cb({
-            ok: true,
-            me: {
-                id: socket.id,
-                username: clean,
-                role: record.role,
-                color: record.color || "#5865f2",
-                status: record.status || "Çevrimiçi"
-            },
-            channels: db.channels,
-            messages: db.messages,
-            settings: getPublicSettings(),
-            adminSettings: record.role === "admin" ? db.settings : null
-        });
-
-        if (record.role === "admin") {
-            socket.emit("db-sync", db);
-        }
-        broadcastState();
+        cb(completeUserSession(socket, clean, record, token));
     });
 
-    // Profil rengi & durum güncelleme
+    socket.on("login-token", (token, cb) => {
+        const clean = token && db.sessions[token];
+        const record = clean && db.users[clean];
+        if (!clean || !record) return cb({ ok: false });
+        cb(completeUserSession(socket, clean, record, token));
+    });
+
+    socket.on("logout", (token) => {
+        if (token && db.sessions[token]) {
+            delete db.sessions[token];
+            saveAndSyncDB();
+        }
+    });
+
+    // Profil güncelleme
     socket.on("update-profile", ({ color, status }) => {
         const user = activeUsers.get(socket.id);
         if (!user || !db.users[user.username]) return;
@@ -270,11 +335,12 @@ io.on("connection", (socket) => {
             user.status = cleanStatus;
             db.users[user.username].status = cleanStatus;
         }
+        db.meta.seededOnly = false;
         saveAndSyncDB();
         broadcastState();
     });
 
-    // 3. ZENGİN SOHBET (Mesaj, Resim, Yanıt, Tepki, Sabitleme)
+    // 3. ZENGİN SOHBET
     socket.on("chat-message", ({ channelId, text, image, replyTo }) => {
         const user = activeUsers.get(socket.id);
         if (!user || (!text?.trim() && !image)) return;
@@ -308,6 +374,7 @@ io.on("connection", (socket) => {
             const idx = db.messages[channelId].findIndex((m) => !m.pinned);
             if (idx !== -1) db.messages[channelId].splice(idx, 1);
         }
+        db.meta.seededOnly = false;
         saveAndSyncDB();
         io.emit("chat-message", msg);
     });
@@ -357,7 +424,7 @@ io.on("connection", (socket) => {
         socket.broadcast.emit("user-typing", { channelId, username: user.username, isTyping });
     });
 
-    // 4. SES KANALLARI & DURUMLAR
+    // 4. SES KANALLARI
     socket.on("join-voice", (channelId, cb) => {
         const user = activeUsers.get(socket.id);
         if (!user) return;
@@ -440,6 +507,7 @@ io.on("connection", (socket) => {
         const newRole = target.role === "admin" ? "user" : "admin";
         target.role = newRole;
         db.users[target.username].role = newRole;
+        db.meta.seededOnly = false;
         saveAndSyncDB();
         io.to(targetId).emit("role-updated", { role: newRole, adminSettings: newRole === "admin" ? db.settings : null });
         broadcastState();
@@ -455,6 +523,7 @@ io.on("connection", (socket) => {
             topic: (topic || "").trim().slice(0, 80)
         });
         if (type !== "voice") db.messages[id] = [];
+        db.meta.seededOnly = false;
         saveAndSyncDB();
         broadcastState();
     });
@@ -470,6 +539,7 @@ io.on("connection", (socket) => {
                 io.emit("user-left-voice", sid);
             }
         }
+        db.meta.seededOnly = false;
         saveAndSyncDB();
         broadcastState();
     });
@@ -487,6 +557,7 @@ io.on("connection", (socket) => {
             username: (turnUser || "").trim().slice(0, 80),
             credential: (turnPass || "").trim().slice(0, 120)
         };
+        db.meta.seededOnly = false;
         saveAndSyncDB();
         broadcastState();
         cb?.({ ok: true });
