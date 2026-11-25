@@ -23,8 +23,8 @@ const DEFAULT_PERF_CONFIG = {
     disableGpu: false,
     overlay: {
         enabled: false,
-        position: "top-left",
-        size: "md"
+        position: "top-left", // top-left | top-right | bottom-left | bottom-right
+        size: "md"            // sm | md | lg
     }
 };
 
@@ -79,6 +79,7 @@ const LOCAL_DB_BAK_PATH = path.join(DB_DIR, "bizim_discord_db.bak.json");
 
 let mainWin = null;
 let overlayWin = null;
+let overlayKeepTopTimer = null;
 let pendingScreenChoice = { sourceId: null, withAudio: false };
 let lastOverlayState = { active: false, channelName: "", users: [] };
 
@@ -150,15 +151,29 @@ function positionOverlayWindow() {
     });
 }
 
+function stopOverlayKeepTop() {
+    if (overlayKeepTopTimer) {
+        clearInterval(overlayKeepTopTimer);
+        overlayKeepTopTimer = null;
+    }
+}
+
 function syncOverlayVisibility() {
+    // BizimDiscord ana penceresi ekranda ve odaktayken overlay gizlenir;
+    // Alt+Tab ile başka uygulamaya/oyuna geçince veya simge durumuna küçültülünce otomatik açılır.
+    const mainActiveOnScreen =
+        Boolean(mainWin && !mainWin.isDestroyed() && mainWin.isFocused() && !mainWin.isMinimized());
+
     const shouldShow =
         perfConfig.overlay.enabled &&
         !bootedWithoutGpu &&
+        !mainActiveOnScreen &&
         Boolean(lastOverlayState.active) &&
         Array.isArray(lastOverlayState.users) &&
         lastOverlayState.users.length > 0;
 
     if (!shouldShow) {
+        stopOverlayKeepTop();
         if (overlayWin && !overlayWin.isDestroyed() && overlayWin.isVisible()) {
             overlayWin.hide();
         }
@@ -175,7 +190,19 @@ function syncOverlayVisibility() {
         overlayWin.showInactive();
     }
     overlayWin.setAlwaysOnTop(true, "screen-saver", 1);
+    overlayWin.moveTop();
     overlayWin.setIgnoreMouseEvents(true, { forward: true });
+
+    if (!overlayKeepTopTimer) {
+        overlayKeepTopTimer = setInterval(() => {
+            if (!overlayWin || overlayWin.isDestroyed() || !overlayWin.isVisible()) {
+                stopOverlayKeepTop();
+                return;
+            }
+            overlayWin.setAlwaysOnTop(true, "screen-saver", 1);
+            overlayWin.moveTop();
+        }, 1500);
+    }
 }
 
 function createOverlayWindow() {
@@ -222,6 +249,7 @@ function createOverlayWindow() {
     });
 
     overlayWin.on("closed", () => {
+        stopOverlayKeepTop();
         overlayWin = null;
     });
 }
@@ -229,7 +257,6 @@ function createOverlayWindow() {
 // =========================================================================
 // IPC HANDLERS
 // =========================================================================
-
 ipcMain.handle("get-gpu-mode", async () => perfConfig.disableGpu);
 
 ipcMain.handle("set-gpu-mode", async (_event, disableGpu) => {
@@ -284,6 +311,7 @@ ipcMain.handle("set-overlay-config", async (_event, partialCfg) => {
         }
         syncOverlayVisibility();
     } else if (overlayWin && !overlayWin.isDestroyed()) {
+        stopOverlayKeepTop();
         overlayWin.hide();
     }
 
@@ -308,7 +336,7 @@ ipcMain.on("overlay-update-state", (_event, payload) => {
     syncOverlayVisibility();
 });
 
-// Zırhlı Yerel DB Yazımı: Daha az kullanıcılı veya sıfırlanmış sunucu verisi dolu yedeği asla ezemez
+// Zırhlı Yerel DB Yazımı
 ipcMain.handle("db-save", async (_event, data) => {
     try {
         ensureLocalDBDir();
@@ -353,7 +381,6 @@ ipcMain.handle("db-save", async (_event, data) => {
     }
 });
 
-// Ana dosya ve .bak yedeğini karşılaştırır, en dolu/sağlam olanı döndürür
 ipcMain.handle("db-load", async () => {
     const readValid = (filePath) => {
         try {
@@ -426,7 +453,6 @@ function createWindow() {
 
     session.defaultSession.clearCache();
 
-    // İzinleri yalnızca güvenilir sunucu origin'i için onayla
     session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => {
         const allowed = ["media", "mediaKeySystem", "fullscreen", "display-capture"];
         const currentUrl = wc?.getURL() || "";
@@ -483,8 +509,14 @@ function createWindow() {
     let tries = 0;
     let stopped = false;
 
+    mainWin.on("focus", () => syncOverlayVisibility());
+    mainWin.on("blur", () => syncOverlayVisibility());
+    mainWin.on("minimize", () => syncOverlayVisibility());
+    mainWin.on("restore", () => syncOverlayVisibility());
+
     mainWin.on("closed", () => {
         stopped = true;
+        stopOverlayKeepTop();
         if (overlayWin && !overlayWin.isDestroyed()) {
             overlayWin.destroy();
             overlayWin = null;
@@ -537,7 +569,10 @@ function createWindow() {
 }
 
 app.whenReady().then(createWindow);
-app.on("will-quit", () => globalShortcut.unregisterAll());
+app.on("will-quit", () => {
+    stopOverlayKeepTop();
+    globalShortcut.unregisterAll();
+});
 app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();
 });

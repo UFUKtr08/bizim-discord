@@ -117,7 +117,7 @@ export function renderPollsList() {
 }
 
 // =========================================================================
-// ORTAK İZLEME (SENKRONİZE YOUTUBE)
+// ORTAK İZLEME (SENKRONİZE YOUTUBE — ECHO & 0:00 RESET KORUMALI)
 // =========================================================================
 export function loadYouTubeAPI() {
     if (window.YT && window.YT.Player) return Promise.resolve();
@@ -155,9 +155,14 @@ export async function applyWatchState(w) {
     if ($("watch-title-lbl")) $("watch-title-lbl").textContent = state.watchState.title || "Ortak İzleme";
     if ($("watch-host-lbl")) $("watch-host-lbl").textContent = state.watchState.hostName ? `• ${state.watchState.hostName}` : "";
 
-    const elapsed = state.watchState.playing ? (Date.now() - (state.watchState.updatedAt || Date.now())) / 1000 : 0;
-    const targetTime = Math.max(0, (state.watchState.currentTime || 0) + elapsed);
+    const getExpectedServerTime = () => {
+        const elapsed = state.watchState.playing
+            ? (Date.now() - (state.watchState.updatedAt || Date.now())) / 1000
+            : 0;
+        return Math.max(0, (state.watchState.currentTime || 0) + elapsed);
+    };
 
+    const targetTime = getExpectedServerTime();
     await loadYouTubeAPI();
 
     if (!state.ytPlayer || state.ytPlayerVideoId !== state.watchState.videoId) {
@@ -166,7 +171,7 @@ export async function applyWatchState(w) {
         }
         if ($("yt-player-host")) $("yt-player-host").innerHTML = '<div id="yt-inner-player"></div>';
         state.ytPlayerVideoId = state.watchState.videoId;
-        state.suppressYtEventsUntil = Date.now() + 1800;
+        state.suppressYtEventsUntil = Date.now() + 3000;
 
         state.ytPlayer = new window.YT.Player("yt-inner-player", {
             videoId: state.watchState.videoId,
@@ -178,17 +183,27 @@ export async function applyWatchState(w) {
             },
             events: {
                 onReady: (ev) => {
-                    state.suppressYtEventsUntil = Date.now() + 1400;
-                    ev.target.seekTo(targetTime, true);
+                    state.suppressYtEventsUntil = Date.now() + 2600;
+                    const expected = getExpectedServerTime();
+                    if (expected > 1) ev.target.seekTo(expected, true);
                     if (state.watchState.playing) ev.target.playVideo();
                     else ev.target.pauseVideo();
                 },
                 onStateChange: (ev) => {
                     if (Date.now() < state.suppressYtEventsUntil || !state.watchState.active) return;
                     const cur = ev.target.getCurrentTime ? ev.target.getCurrentTime() : 0;
+                    const expected = getExpectedServerTime();
+
                     if (ev.data === window.YT.PlayerState.PLAYING) {
+                        if (state.watchState.playing && cur < 1.5 && expected > 4) {
+                            state.suppressYtEventsUntil = Date.now() + 2000;
+                            ev.target.seekTo(expected, true);
+                            return;
+                        }
+                        if (state.watchState.playing && Math.abs(cur - expected) < 2.2) return;
                         socket.emit("watch-sync", { serverId: state.activeServerId, action: "play", currentTime: cur });
                     } else if (ev.data === window.YT.PlayerState.PAUSED) {
+                        if (!state.watchState.playing && Math.abs(cur - expected) < 2.2) return;
                         socket.emit("watch-sync", { serverId: state.activeServerId, action: "pause", currentTime: cur });
                     }
                 }
@@ -198,13 +213,17 @@ export async function applyWatchState(w) {
     }
 
     try {
-        state.suppressYtEventsUntil = Date.now() + 1200;
+        state.suppressYtEventsUntil = Date.now() + 2000;
         const cur = typeof state.ytPlayer.getCurrentTime === "function" ? state.ytPlayer.getCurrentTime() : 0;
-        if (Math.abs(cur - targetTime) > 1.6) {
+        const ps = typeof state.ytPlayer.getPlayerState === "function" ? state.ytPlayer.getPlayerState() : -1;
+        if (Math.abs(cur - targetTime) > 2.0) {
             state.ytPlayer.seekTo(targetTime, true);
         }
-        if (state.watchState.playing) state.ytPlayer.playVideo();
-        else state.ytPlayer.pauseVideo();
+        if (state.watchState.playing && ps !== window.YT.PlayerState.PLAYING) {
+            state.ytPlayer.playVideo();
+        } else if (!state.watchState.playing && ps === window.YT.PlayerState.PLAYING) {
+            state.ytPlayer.pauseVideo();
+        }
     } catch { }
 }
 

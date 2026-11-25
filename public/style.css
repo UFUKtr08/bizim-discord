@@ -2624,4 +2624,44 @@ input[type="range"] {
     .ch-more-btn {
         opacity: 0.85;
     }
+
+    .msg-file-card {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 6px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        background: var(--bg-panel);
+        border: 1px solid var(--border-soft);
+        color: var(--text-bright);
+        text-decoration: none;
+        max-width: 340px;
+    }
+
+    .msg-file-card:hover {
+        border-color: var(--accent);
+    }
+
+    .msg-file-ico {
+        font-size: 20px;
+    }
+
+    .msg-file-meta {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+    }
+
+    .msg-file-meta strong {
+        font-size: 13px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .msg-file-meta small {
+        font-size: 11px;
+        color: var(--text-muted);
+    }
 }

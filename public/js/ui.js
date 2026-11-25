@@ -910,7 +910,7 @@ export function fillRoleEditor(role) {
 }
 
 // =========================================================================
-// METİN SOHBETİ
+// METİN SOHBETİ (GÖRSEL + DOSYA KARTI DESTEKLİ)
 // =========================================================================
 export function createMessageElement(msg) {
     const isMentioned = state.me && msg.text && new RegExp(`@${state.me.username}\\b`, "i").test(msg.text);
@@ -933,7 +933,7 @@ export function createMessageElement(msg) {
     if (msg.replyTo) {
         const rep = document.createElement("div");
         rep.className = "msg-reply-ref";
-        rep.textContent = `↪ ${msg.replyTo.sender}: ${msg.replyTo.text}`;
+        rep.textContent = `↪ ${msg.replyTo.sender}: ${msg.replyTo.text || (msg.replyTo.hasFile ? "[Dosya]" : "[Görsel]")}`;
         body.appendChild(rep);
     }
 
@@ -988,6 +988,29 @@ export function createMessageElement(msg) {
             $("lightbox")?.classList.add("show");
         };
         body.appendChild(img);
+    }
+
+    if (msg.file && msg.file.url) {
+        const card = document.createElement("a");
+        card.className = "msg-file-card";
+        card.href = msg.file.url;
+        card.download = msg.file.name || "dosya";
+        card.target = "_blank";
+        card.rel = "noopener noreferrer";
+
+        const sz = msg.file.size || 0;
+        const sizeTxt = sz >= 1024 * 1024
+            ? `${(sz / (1024 * 1024)).toFixed(2)} MB`
+            : `${Math.max(1, Math.round(sz / 1024))} KB`;
+
+        card.innerHTML = `
+            <span class="msg-file-ico">📄</span>
+            <span class="msg-file-meta">
+                <strong>${escapeHTML(msg.file.name || "dosya")}</strong>
+                <small>${sizeTxt} • İndirmek için tıkla</small>
+            </span>
+        `;
+        body.appendChild(card);
     }
 
     if (msg.reactions && Object.keys(msg.reactions).length) {
@@ -1087,7 +1110,12 @@ export function renderMessages() {
     const list = state.messagesByChannel[state.activeChannelId] || [];
 
     const filtered = q
-        ? list.filter((m) => (m.text || "").toLowerCase().includes(q) || (m.sender || "").toLowerCase().includes(q))
+        ? list.filter(
+            (m) =>
+                (m.text || "").toLowerCase().includes(q) ||
+                (m.sender || "").toLowerCase().includes(q) ||
+                (m.file?.name || "").toLowerCase().includes(q)
+        )
         : list;
 
     if (!filtered.length) {
@@ -1109,10 +1137,12 @@ export function setReplyTarget(msg) {
         id: msg.id,
         sender: msg.displayName || msg.sender,
         text: msg.text || "",
-        hasImage: Boolean(msg.image)
+        hasImage: Boolean(msg.image),
+        hasFile: Boolean(msg.file)
     };
     if ($("reply-text")) {
-        $("reply-text").textContent = `Yanıtlanıyor: ${state.replyTarget.sender} — ${state.replyTarget.text || "[Görsel]"}`;
+        const fallback = state.replyTarget.hasFile ? "[Dosya]" : "[Görsel]";
+        $("reply-text").textContent = `Yanıtlanıyor: ${state.replyTarget.sender} — ${state.replyTarget.text || fallback}`;
     }
     $("reply-banner")?.classList.add("show");
     $("chat-input")?.focus();
@@ -1138,5 +1168,39 @@ export async function sendChatImage(file) {
         clearReply();
     } catch {
         showToast("Görsel işlenemedi.", "err");
+    }
+}
+
+export async function sendChatFile(file) {
+    if (!state.activeServerId || !state.activeChannelId || !file) return;
+    if (file.size > 10 * 1024 * 1024) {
+        return showToast("Dosya en fazla 10 MB olabilir.", "err");
+    }
+    showToast(`Yükleniyor: ${file.name}...`, "info", 2000);
+    try {
+        const res = await fetch("/api/upload", {
+            method: "POST",
+            headers: {
+                "x-socket-id": socket.id,
+                "x-file-name": encodeURIComponent(file.name),
+                "x-file-mime": file.type || "application/octet-stream"
+            },
+            body: file
+        });
+        const data = await res.json();
+        if (!res.ok || !data?.ok) {
+            return showToast(data?.error || "Dosya yüklenemedi.", "err");
+        }
+        socket.emit("chat-message", {
+            serverId: state.activeServerId,
+            channelId: state.activeChannelId,
+            text: $("chat-input")?.value.trim() || "",
+            file: data.file,
+            replyTo: state.replyTarget
+        });
+        if ($("chat-input")) $("chat-input").value = "";
+        clearReply();
+    } catch {
+        showToast("Dosya yükleme başarısız.", "err");
     }
 }

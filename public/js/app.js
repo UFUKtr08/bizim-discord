@@ -96,7 +96,8 @@ import {
     createMessageElement,
     renderMessages,
     clearReply,
-    sendChatImage
+    sendChatImage,
+    sendChatFile
 } from "./ui.js";
 
 // =========================================================================
@@ -209,7 +210,6 @@ function handleLoginSuccess(res) {
         socket.emit("update-profile", { afkExempt: true });
     }
 
-    // Manuel giriş sonrasında da Genel Yöneticiyse yerel PC yedeğini kontrol edip sunucuyla birleştir
     if (isElectron && state.me?.isGlobalAdmin) {
         syncLocalDbWithServerIfNeeded({ silentIfDenied: true });
     }
@@ -714,7 +714,7 @@ function bindAllUIEvents() {
         });
     };
 
-    // Mesaj & Görsel Gönderme
+    // Mesaj, Görsel & Dosya Gönderme
     $("btn-cancel-reply").onclick = clearReply;
     $("btn-img").onclick = () => $("img-input").click();
     $("img-input").onchange = (e) => {
@@ -722,6 +722,15 @@ function bindAllUIEvents() {
         if (file) sendChatImage(file);
         e.target.value = "";
     };
+
+    if ($("btn-file") && $("file-input")) {
+        $("btn-file").onclick = () => $("file-input").click();
+        $("file-input").onchange = (e) => {
+            const file = e.target.files?.[0];
+            if (file) sendChatFile(file);
+            e.target.value = "";
+        };
+    }
 
     $("chat-input").addEventListener("paste", (e) => {
         const item = Array.from(e.clipboardData?.items || []).find((i) => i.type.startsWith("image/"));
@@ -978,7 +987,7 @@ function bindAllUIEvents() {
         e.target.value = "";
     };
 
-    // Klavye & Sekme Görünürlüğü
+    // Klavye Kısayolları (Web Alt+M / Alt+D + Bas-Konuş) & Sekme Görünürlüğü
     window.addEventListener("keydown", (e) => {
         if (state.awaitingPttKey) {
             e.preventDefault();
@@ -996,6 +1005,18 @@ function bindAllUIEvents() {
                 if (ov.id !== "auth-overlay") closeModal(ov.id);
             });
             return;
+        }
+        if (!isElectron && state.voiceChannelId && e.altKey && !e.ctrlKey && !e.metaKey) {
+            if (e.code === "KeyM") {
+                e.preventDefault();
+                toggleMute();
+                return;
+            }
+            if (e.code === "KeyD") {
+                e.preventDefault();
+                toggleDeafen();
+                return;
+            }
         }
         if (state.pttEnabled && state.voiceChannelId && e.code === state.pttKey && !state.pttPressed) {
             const tag = document.activeElement?.tagName;

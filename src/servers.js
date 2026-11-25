@@ -668,57 +668,69 @@ function registerServerHandlers(io, socket) {
     });
 
     // --- METİN SOHBETİ ---
-    socket.on("chat-message", ({ serverId, channelId, text, image, replyTo }) => {
-        if (!checkRateLimit("msg:" + socket.id, 10, 5000)) return;
-
+    socket.on("chat-message", ({ serverId, channelId, text, image, file, replyTo }) => {
         const db = getDB();
         const user = activeUsers.get(socket.id);
-        const srv = db.servers[serverId];
+        const srv = serverId && db.servers[serverId];
         if (!user || !srv || !srv.members[user.username]) return;
-
-        const safeImage = isSafeRasterDataUrl(image, 1600000) ? image : null;
-        if (!text?.trim() && !safeImage) return;
 
         const ch = srv.channels.find((c) => c.id === channelId && c.type === "text");
         if (!ch) return;
 
-        let safeReply = null;
-        if (replyTo && replyTo.sender && (replyTo.text || replyTo.hasImage)) {
-            safeReply = {
-                id: String(replyTo.id || ""),
-                sender: String(replyTo.sender).slice(0, 28),
-                text: String(replyTo.text || "[Görsel]").slice(0, 120)
+        const cleanText = typeof text === "string" ? text.trim().slice(0, 2000) : "";
+        const safeImage = isSafeRasterDataUrl(image, 1800000) ? image : null;
+
+        let safeFile = null;
+        if (file && typeof file === "object" && typeof file.url === "string" && file.url.startsWith("/api/files/")) {
+            safeFile = {
+                id: String(file.id || "").slice(0, 32),
+                name: String(file.name || "dosya").slice(0, 100),
+                size: Math.max(0, Math.min(10 * 1024 * 1024, Number(file.size) || 0)),
+                mime: String(file.mime || "").slice(0, 80),
+                url: file.url.slice(0, 260)
             };
         }
 
-        const topRole = getMemberTopRole(srv, user.username);
+        if (!cleanText && !safeImage && !safeFile) return;
+
+        const safeReply = replyTo && typeof replyTo === "object"
+            ? {
+                id: String(replyTo.id || "").slice(0, 40),
+                sender: String(replyTo.sender || "").slice(0, 32),
+                text: String(replyTo.text || "").slice(0, 140),
+                hasImage: Boolean(replyTo.hasImage),
+                hasFile: Boolean(replyTo.hasFile)
+            }
+            : null;
+
+        const rec = db.users[user.username];
         const msg = {
-            id: "m-" + Date.now() + "-" + Math.random().toString(36).slice(2, 6),
-            serverId,
-            channelId,
+            id: "msg-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6),
+            serverId: srv.id,
+            channelId: ch.id,
             sender: user.username,
-            displayName: user.displayName || user.username,
-            avatar: user.avatar || "",
-            color: user.color,
-            topRole: topRole ? { name: topRole.name, color: topRole.color } : null,
-            text: (text || "").trim().slice(0, 2000),
+            displayName: rec?.displayName || user.username,
+            color: rec?.color || "#5865f2",
+            avatar: rec?.avatar || "",
+            topRole: getMemberTopRole(srv, user.username),
+            text: cleanText,
             image: safeImage,
+            file: safeFile,
             replyTo: safeReply,
             reactions: {},
             pinned: false,
             time: new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })
         };
 
-        if (!srv.messages[channelId]) srv.messages[channelId] = [];
-        srv.messages[channelId].push(msg);
-        if (srv.messages[channelId].length > 200) {
-            const idx = srv.messages[channelId].findIndex((m) => !m.pinned);
-            if (idx !== -1) srv.messages[channelId].splice(idx, 1);
+        if (!Array.isArray(srv.messages[ch.id])) srv.messages[ch.id] = [];
+        srv.messages[ch.id].push(msg);
+        if (srv.messages[ch.id].length > 200) {
+            srv.messages[ch.id] = srv.messages[ch.id].slice(-200);
         }
 
         db.meta.seededOnly = false;
         saveAndSyncDB();
-        io.to("srv:" + serverId).emit("chat-message", msg);
+        io.to("srv:" + srv.id).emit("chat-message", msg);
     });
 
     socket.on("toggle-reaction", ({ serverId, channelId, msgId, emoji }) => {

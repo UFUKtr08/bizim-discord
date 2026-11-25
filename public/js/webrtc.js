@@ -407,7 +407,7 @@ async function applyVideoSenderTuning(sender, kind, res = 480) {
 }
 
 // =========================================================================
-// PERFECT NEGOTIATION + ONNEGOTIATIONNEEDED + SIRALI SİNYAL KUYRUĞU
+// PERFECT NEGOTIATION + GLARE-FREE JOIN + SIRALI SİNYAL KUYRUĞU
 // =========================================================================
 function enqueuePeerOp(peer, fn) {
     peer.queue = peer.queue
@@ -431,17 +431,19 @@ function isSenderActiveOnPc(pc, sender, expectedTrack) {
     }
 }
 
+function attachLocalMicOnly(peer) {
+    if (peer.closed || !state.processedMicStream) return false;
+    const mt = state.processedMicStream.getAudioTracks()[0];
+    if (mt && mt.readyState === "live" && !isSenderActiveOnPc(peer.pc, peer.micSender, mt)) {
+        peer.micSender = peer.pc.addTrack(mt, state.processedMicStream);
+        return true;
+    }
+    return false;
+}
+
 function ensureLocalTracksAttached(peerId, peer) {
     if (peer.closed) return false;
-    let changed = false;
-
-    if (state.processedMicStream) {
-        const mt = state.processedMicStream.getAudioTracks()[0];
-        if (mt && !isSenderActiveOnPc(peer.pc, peer.micSender, mt)) {
-            peer.micSender = peer.pc.addTrack(mt, state.processedMicStream);
-            changed = true;
-        }
-    }
+    let changed = attachLocalMicOnly(peer);
 
     if (state.camStream) {
         const ct = state.camStream.getVideoTracks()[0];
@@ -468,6 +470,7 @@ function ensureLocalTracksAttached(peerId, peer) {
         }
     }
 
+    // Rollback veya geç katılım sonrası müzakere edilmemiş (mikrofon dahil) gönderici varsa yakala
     if (!changed && peer.pc.signalingState === "stable") {
         const checkUnnegotiated = (sender) => {
             if (!sender || !sender.track) return false;
@@ -481,7 +484,12 @@ function ensureLocalTracksAttached(peerId, peer) {
                 return false;
             }
         };
-        if (checkUnnegotiated(peer.camSender) || checkUnnegotiated(peer.screenVideoSender) || checkUnnegotiated(peer.screenAudioSender)) {
+        if (
+            checkUnnegotiated(peer.micSender) ||
+            checkUnnegotiated(peer.camSender) ||
+            checkUnnegotiated(peer.screenVideoSender) ||
+            checkUnnegotiated(peer.screenAudioSender)
+        ) {
             changed = true;
         }
     }
@@ -534,7 +542,7 @@ export function scheduleNegotiation(peerId, iceRestart = false) {
 }
 
 export function sendOfferToPeer(peerId, iceRestart = false) {
-    getOrCreatePeer(peerId);
+    getOrCreatePeer(peerId, { autoAttach: true });
     scheduleNegotiation(peerId, iceRestart);
 }
 
@@ -547,7 +555,7 @@ async function flushCandidates(peer) {
     }
 }
 
-export function getOrCreatePeer(peerId) {
+export function getOrCreatePeer(peerId, { autoAttach = true } = {}) {
     if (state.peers.has(peerId)) return state.peers.get(peerId);
 
     const pc = new RTCPeerConnection({
@@ -566,6 +574,7 @@ export function getOrCreatePeer(peerId) {
         needsNegotiation: false,
         pendingIceRestart: false,
         autoIceRestarted: false,
+        joinFallbackTimer: null,
         queue: Promise.resolve(),
         pendingCandidates: [],
         micSender: null,
@@ -675,14 +684,21 @@ export function getOrCreatePeer(peerId) {
         }
     };
 
-    ensureLocalTracksAttached(peerId, peer);
+    if (autoAttach) {
+        ensureLocalTracksAttached(peerId, peer);
+    }
 
     return peer;
 }
 
 export function handleIncomingOffer(from, offer) {
     if (!state.voiceChannelId || !from || !offer) return;
-    const peer = getOrCreatePeer(from);
+    // Gelen offer'da önce tracksiz peer açılır ki setRemoteDescription sonrası mikrofon doğrudan sendrecv bağlansın
+    const peer = getOrCreatePeer(from, { autoAttach: false });
+    if (peer.joinFallbackTimer) {
+        clearTimeout(peer.joinFallbackTimer);
+        peer.joinFallbackTimer = null;
+    }
 
     enqueuePeerOp(peer, async () => {
         if (peer.closed) return;
@@ -703,6 +719,9 @@ export function handleIncomingOffer(from, offer) {
             await peer.pc.setRemoteDescription(cleanOffer);
             await flushCandidates(peer);
 
+            // Mikrofonu createAnswer'dan önce bağla -> tek turda çift yönlü (sendrecv) ses kurulur
+            attachLocalMicOnly(peer);
+
             const answer = await peer.pc.createAnswer();
             answer.sdp = optimizeOpusSDP(answer.sdp);
             await peer.pc.setLocalDescription(answer);
@@ -717,10 +736,9 @@ export function handleIncomingOffer(from, offer) {
                 }
             });
 
+            // Mikrofon zaten answer ile müzakere edildi; yalnızca aktif kamera/ekran veya eksik gönderici varsa re-offer at
+            peer.needsNegotiation = false;
             ensureLocalTracksAttached(from, peer);
-            if (peer.needsNegotiation && peer.pc.signalingState === "stable") {
-                scheduleNegotiation(from, false);
-            }
         } catch { }
     });
 }
@@ -763,14 +781,25 @@ export function handlePeerJoinedVoice({ peerId, serverId, channelId }) {
     if (!peerId || peerId === socket.id) return;
     if (serverId !== state.voiceServerId || channelId !== state.voiceChannelId) return;
 
-    const peer = getOrCreatePeer(peerId);
-    ensureLocalTracksAttached(peerId, peer);
+    // İlk offer'ı yeni katılan kişi atar (glare olmaz). 3 sn içinde gelmezse yedek olarak biz başlatırız.
+    const peer = getOrCreatePeer(peerId, { autoAttach: false });
+    if (peer.joinFallbackTimer) clearTimeout(peer.joinFallbackTimer);
+    peer.joinFallbackTimer = setTimeout(() => {
+        peer.joinFallbackTimer = null;
+        if (!peer.closed && !peer.pc.remoteDescription && peer.pc.signalingState === "stable") {
+            ensureLocalTracksAttached(peerId, peer);
+        }
+    }, 3000);
 }
 
 export function closePeer(peerId) {
     const peer = state.peers.get(peerId);
     if (peer) {
         peer.closed = true;
+        if (peer.joinFallbackTimer) {
+            clearTimeout(peer.joinFallbackTimer);
+            peer.joinFallbackTimer = null;
+        }
         peer.audioNodes.slice().forEach((n) => cleanupRemoteAudioNode(peer, n));
         try {
             peer.pc.onnegotiationneeded = null;

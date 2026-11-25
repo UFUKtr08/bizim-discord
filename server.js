@@ -2,6 +2,8 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const path = require("path");
+const fs = require("fs");
+const crypto = require("crypto");
 
 const {
     PORT,
@@ -13,6 +15,7 @@ const {
     activeUsers,
     soundboardCooldown,
     getClientIp,
+    checkRateLimit,
     computeDynamicLoadSnapshot,
     broadcastUserPresenceAcrossServers
 } = require("./src/db");
@@ -49,6 +52,94 @@ app.use((_req, res, next) => {
 
 app.use(express.static(path.join(__dirname, "public")));
 
+// =========================================================================
+// GEÇİCİ DOSYA PAYLAŞIMI (GIST'İ ŞİŞİRMEDEN MAKS 10 MB / TOPLAM 80 MB KOTA)
+// =========================================================================
+const UPLOAD_DIR = path.join(__dirname, "uploads");
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_UPLOAD_TOTAL_BYTES = 80 * 1024 * 1024;
+const uploadedFiles = new Map();
+
+if (!fs.existsSync(UPLOAD_DIR)) {
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
+function pruneUploadsIfNeeded() {
+    let total = 0;
+    for (const f of uploadedFiles.values()) total += f.size;
+    if (total <= MAX_UPLOAD_TOTAL_BYTES) return;
+
+    const sorted = Array.from(uploadedFiles.entries()).sort((a, b) => a[1].createdAt - b[1].createdAt);
+    for (const [id, meta] of sorted) {
+        if (total <= MAX_UPLOAD_TOTAL_BYTES * 0.75) break;
+        fs.unlink(meta.path, () => { });
+        uploadedFiles.delete(id);
+        total -= meta.size;
+    }
+}
+
+app.post(
+    "/api/upload",
+    express.raw({ type: "*/*", limit: "11mb" }),
+    (req, res) => {
+        const sid = String(req.headers["x-socket-id"] || "").trim();
+        if (!sid || !activeUsers.has(sid)) {
+            return res.status(401).json({ ok: false, error: "Dosya yüklemek için giriş yapmalısın." });
+        }
+        if (!checkRateLimit("upload:" + sid, 12, 60000)) {
+            return res.status(429).json({ ok: false, error: "Çok sık dosya yükledin. Biraz bekle." });
+        }
+        if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+            return res.status(400).json({ ok: false, error: "Boş dosya gönderildi." });
+        }
+        if (req.body.length > MAX_UPLOAD_BYTES) {
+            return res.status(413).json({ ok: false, error: "Dosya boyutu en fazla 10 MB olabilir." });
+        }
+
+        let rawName = String(req.headers["x-file-name"] || "dosya");
+        try {
+            rawName = decodeURIComponent(rawName);
+        } catch { }
+        const safeName = rawName.replace(/[\\/:*?"<>|\r\n]/g, "_").trim().slice(0, 100) || "dosya";
+        const mime = String(req.headers["x-file-mime"] || "application/octet-stream").slice(0, 100);
+        const id = crypto.randomBytes(12).toString("hex");
+        const filePath = path.join(UPLOAD_DIR, id);
+
+        fs.writeFile(filePath, req.body, (err) => {
+            if (err) return res.status(500).json({ ok: false, error: "Dosya kaydedilemedi." });
+            uploadedFiles.set(id, {
+                path: filePath,
+                name: safeName,
+                mime,
+                size: req.body.length,
+                createdAt: Date.now()
+            });
+            pruneUploadsIfNeeded();
+            res.json({
+                ok: true,
+                file: {
+                    id,
+                    name: safeName,
+                    size: req.body.length,
+                    mime,
+                    url: `/api/files/${id}/${encodeURIComponent(safeName)}`
+                }
+            });
+        });
+    }
+);
+
+app.get("/api/files/:id/:name?", (req, res) => {
+    const id = String(req.params.id || "").replace(/[^a-f0-9]/g, "");
+    const meta = uploadedFiles.get(id);
+    if (!meta || !fs.existsSync(meta.path)) {
+        return res.status(404).send("Dosya bulunamadı veya sunucu yeniden başlatıldığı için süresi doldu.");
+    }
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(meta.name)}`);
+    res.sendFile(meta.path);
+});
+
 app.get("/icon.svg", (_req, res) => {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
@@ -66,7 +157,6 @@ app.get("/icon.svg", (_req, res) => {
     res.status(200).send(svg);
 });
 
-// Dışarıya yalnızca uyanış/sağlık sinyali döner (iç metrik sızdırmaz)
 app.options("/health", (_req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
@@ -136,7 +226,6 @@ io.on("connection", (socket) => {
     });
 });
 
-// Bulut Gist yedeğini (tanımlıysa) istemci kabul etmeden önce yükle
 async function bootstrap() {
     await initCloudDB();
     server.listen(PORT, () => {
