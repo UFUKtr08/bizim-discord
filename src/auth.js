@@ -16,7 +16,8 @@ const {
     normalizeRecoveryCodeInput,
     sanitizeAvatar,
     normalizeSessionEntry,
-    normalizeDB,
+    getDBSummary,
+    mergeOrRestoreDB,
     isGlobalAdminSocket,
     getUserServersList,
     buildServerSnapshot,
@@ -81,7 +82,8 @@ function completeUserSession(io, socket, username, record, tokenToReturn) {
         socket.join("srv:" + s.id);
     }
 
-    if (record.isGlobalAdmin) {
+    // Boş/sıfırlanmış (seededOnly) DB asla yerel yedeğin üzerine senkronize edilmez
+    if (record.isGlobalAdmin && !db.meta?.seededOnly) {
         socket.emit("db-sync", db);
     }
 
@@ -110,13 +112,26 @@ function completeUserSession(io, socket, username, record, tokenToReturn) {
 
 function registerAuthHandlers(io, socket) {
     // --- YEREL MASTER VERİTABANI SENKRONİZASYONU & RENDER SIFIRLANMA KORUMASI ---
-    socket.on("check-db-needs-restore", (cb) => {
+    socket.on("check-db-needs-restore", (clientMeta, cb) => {
+        const callback = typeof clientMeta === "function" ? clientMeta : cb;
+        const meta = typeof clientMeta === "object" && clientMeta ? clientMeta : {};
         const db = getDB();
-        const needs = Object.keys(db.users).length === 0 || Boolean(db.meta?.seededOnly);
-        if (typeof cb === "function") {
-            cb({
+        const srvSum = getDBSummary(db);
+
+        const localUsers = Number(meta.localUsers) || 0;
+        const localMessages = Number(meta.localMessages) || 0;
+
+        const serverEmptyOrSeeded = srvSum.users === 0 || srvSum.seededOnly;
+        const localIsRicher =
+            localUsers > srvSum.users ||
+            (localMessages > srvSum.messages && localUsers >= srvSum.users);
+
+        const needs = serverEmptyOrSeeded || localIsRicher;
+        if (typeof callback === "function") {
+            callback({
                 needsRestore: needs,
-                requiresSecret: Boolean(needs && BACKUP_SECRET)
+                requiresSecret: Boolean(needs && BACKUP_SECRET && !isGlobalAdminSocket(socket)),
+                serverSummary: srvSum
             });
         }
     });
@@ -128,13 +143,16 @@ function registerAuthHandlers(io, socket) {
 
         const incomingDB = payload && payload.db ? payload.db : payload;
         const providedSecret = String(payload?.backupSecret || incomingDB?._backupSecret || "").trim();
+        const sessionToken = String(payload?.sessionToken || "").trim();
 
         if (!incomingDB || typeof incomingDB !== "object" || !incomingDB.users) {
             return cb?.({ ok: false, error: "Geçersiz veritabanı dosyası." });
         }
 
         const currentDB = getDB();
-        const serverNeedsRestore = Object.keys(currentDB.users).length === 0 || Boolean(currentDB.meta?.seededOnly);
+        const srvSum = getDBSummary(currentDB);
+        const serverNeedsRestore = srvSum.users === 0 || srvSum.seededOnly;
+
         const hasAdminInBackup = Object.values(incomingDB.users).some(
             (u) => u && (u.role === "admin" || u.isGlobalAdmin)
         );
@@ -142,17 +160,29 @@ function registerAuthHandlers(io, socket) {
             return cb?.({ ok: false, error: "Yedek dosyasında yönetici hesabı bulunamadı." });
         }
 
-        if (!serverNeedsRestore && !isGlobalAdminSocket(socket)) {
+        let validAdminTokenInBackup = false;
+        if (sessionToken && incomingDB.sessions && incomingDB.sessions[sessionToken]) {
+            const normTok = normalizeSessionEntry(incomingDB.sessions[sessionToken], incomingDB.users);
+            if (
+                normTok &&
+                (incomingDB.users[normTok.username]?.isGlobalAdmin || incomingDB.users[normTok.username]?.role === "admin")
+            ) {
+                validAdminTokenInBackup = true;
+            }
+        }
+
+        const isAuthorizedAdmin = isGlobalAdminSocket(socket) || validAdminTokenInBackup;
+
+        if (!serverNeedsRestore && !isAuthorizedAdmin) {
             return cb?.({ ok: false, error: "Dolu sunucuya geri yükleme için Genel Yönetici yetkisi gerekli." });
         }
 
-        if (serverNeedsRestore && BACKUP_SECRET && providedSecret !== BACKUP_SECRET) {
-            return cb?.({ ok: false, error: "Boş sunucuya geri yükleme için BACKUP_SECRET anahtarı gerekli." });
+        if (serverNeedsRestore && BACKUP_SECRET && providedSecret !== BACKUP_SECRET && !isAuthorizedAdmin) {
+            return cb?.({ ok: false, error: "Boş sunucuya geri yükleme için BACKUP_SECRET veya yönetici oturumu gerekli." });
         }
 
         const wasV4 = !incomingDB.servers;
-        const nextDB = normalizeDB(incomingDB);
-        nextDB.meta.seededOnly = false;
+        const nextDB = mergeOrRestoreDB(incomingDB);
         setDB(nextDB);
         saveAndSyncDB({ immediateDisk: true });
 
@@ -164,11 +194,28 @@ function registerAuthHandlers(io, socket) {
             isFirstSetup: false
         });
 
+        // Bağlı tüm kullanıcıların sunucu odalarını, sunucu listelerini ve aktif snapshot'larını anında yenile
+        for (const [sid, au] of activeUsers.entries()) {
+            const targetSock = io.sockets.sockets.get(sid);
+            if (!targetSock) continue;
+            const userServers = getUserServersList(au.username);
+            for (const s of userServers) {
+                targetSock.join("srv:" + s.id);
+            }
+            if (!au.activeServerId || !nextDB.servers[au.activeServerId]) {
+                au.activeServerId = userServers[0]?.id || null;
+            }
+            io.to(sid).emit("my-servers-update", userServers);
+            if (au.activeServerId && nextDB.servers[au.activeServerId]) {
+                io.to(sid).emit("server-snapshot-refresh", buildServerSnapshot(nextDB.servers[au.activeServerId], au.username));
+            }
+        }
+
         for (const srvId of Object.keys(nextDB.servers)) {
             broadcastServerState(srvId);
         }
 
-        cb?.({ ok: true, migratedFromV4: wasV4 });
+        cb?.({ ok: true, migratedFromV4: wasV4, userCount: Object.keys(nextDB.users).length });
     });
 
     // --- KİMLİK DOĞRULAMA & KİŞİSEL KURTARMA KODU ---
@@ -244,6 +291,7 @@ function registerAuthHandlers(io, socket) {
 
         db.meta.seededOnly = false;
         saveAndSyncDB({ immediateDisk: true });
+        if (targetServer) broadcastServerState(targetServer.id);
         cb?.({ ok: true, role: db.users[clean].role, recoveryCode });
     });
 

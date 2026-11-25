@@ -120,8 +120,78 @@ hooks.closeToolsPopover = closeToolsPopover;
 hooks.openDmWith = openDmWith;
 
 // =========================================================================
-// BAŞLANGIÇ (OTOMATİK PC DB GERİ YÜKLEME + OTURUM HATIRLAMA)
+// YEREL MASTER DB OTOMATİK GERİ YÜKLEME & MANUEL GİRİŞ SONRASI SENKRON
 // =========================================================================
+let localDbSyncInProgress = false;
+
+function summarizeLocalDB(localDB) {
+    const localUsers = Object.keys(localDB?.users || {}).length;
+    let localMessages = 0;
+    for (const srv of Object.values(localDB?.servers || {})) {
+        for (const arr of Object.values(srv?.messages || {})) {
+            if (Array.isArray(arr)) localMessages += arr.length;
+        }
+    }
+    return { localUsers, localMessages };
+}
+
+async function syncLocalDbWithServerIfNeeded({ silentIfDenied = false } = {}) {
+    if (!isElectron || localDbSyncInProgress) return false;
+    localDbSyncInProgress = true;
+
+    try {
+        const localDB = await window.electronAPI.dbLoad();
+        if (!localDB || !localDB.users) return false;
+
+        const { localUsers, localMessages } = summarizeLocalDB(localDB);
+        if (localUsers === 0) return false;
+
+        const checkInfo = await new Promise((resolve) => {
+            socket.emit("check-db-needs-restore", { localUsers, localMessages }, (res) => {
+                if (typeof res === "boolean") resolve({ needsRestore: res, requiresSecret: false });
+                else resolve(res || { needsRestore: false, requiresSecret: false });
+            });
+        });
+
+        if (!checkInfo.needsRestore) return false;
+
+        const savedSecret = localStorage.getItem("bd_backup_secret") || "";
+        const savedToken = localStorage.getItem("bd_token") || "";
+
+        return await new Promise((resolve) => {
+            socket.emit(
+                "restore-db",
+                { db: localDB, backupSecret: savedSecret, sessionToken: savedToken },
+                (res) => {
+                    if (res?.ok) {
+                        showToast(
+                            res.migratedFromV4
+                                ? "v4.0 yerel veritabanınız v5.x formatına veri kaybı olmadan aktarıldı!"
+                                : `Yerel PC veritabanı sunucuyla eşitlendi (${res.userCount || localUsers} üye).`,
+                            "ok",
+                            4500
+                        );
+                        resolve(true);
+                    } else {
+                        if (!silentIfDenied && checkInfo.requiresSecret && !savedSecret) {
+                            showToast(
+                                "Sunucu sıfırlanmış: Yönetici olarak giriş yapınca veya BACKUP_SECRET girince PC DB otomatik yüklenecek.",
+                                "info",
+                                5500
+                            );
+                        }
+                        resolve(false);
+                    }
+                }
+            );
+        });
+    } catch {
+        return false;
+    } finally {
+        localDbSyncInProgress = false;
+    }
+}
+
 function handleLoginSuccess(res) {
     state.me = res.me;
     state.myServers = res.servers || [];
@@ -139,47 +209,16 @@ function handleLoginSuccess(res) {
         socket.emit("update-profile", { afkExempt: true });
     }
 
+    // Manuel giriş sonrasında da Genel Yöneticiyse yerel PC yedeğini kontrol edip sunucuyla birleştir
+    if (isElectron && state.me?.isGlobalAdmin) {
+        syncLocalDbWithServerIfNeeded({ silentIfDenied: true });
+    }
+
     loadMediaDevices().catch(() => { });
 }
 
 async function bootSequence() {
-    if (isElectron) {
-        const checkInfo = await new Promise((resolve) => {
-            socket.emit("check-db-needs-restore", (res) => {
-                if (typeof res === "boolean") resolve({ needsRestore: res, requiresSecret: false });
-                else resolve(res || { needsRestore: false, requiresSecret: false });
-            });
-        });
-
-        if (checkInfo.needsRestore) {
-            const localDB = await window.electronAPI.dbLoad();
-            if (localDB && localDB.users) {
-                const savedSecret = localStorage.getItem("bd_backup_secret") || "";
-                if (checkInfo.requiresSecret && !savedSecret) {
-                    showToast(
-                        "Sunucu boş: Ayarlar → Veritabanı'ndan BACKUP_SECRET girip PC DB'yi yükleyebilirsin.",
-                        "info",
-                        5500
-                    );
-                } else {
-                    await new Promise((resolve) => {
-                        socket.emit("restore-db", { db: localDB, backupSecret: savedSecret }, (res) => {
-                            if (res?.ok) {
-                                showToast(
-                                    res.migratedFromV4
-                                        ? "v4.0 yerel veritabanınız v5.x formatına veri kaybı olmadan aktarıldı!"
-                                        : "Yerel PC veritabanı sunucuya otomatik geri yüklendi.",
-                                    "ok",
-                                    5000
-                                );
-                            }
-                            resolve();
-                        });
-                    });
-                }
-            }
-        }
-    }
+    await syncLocalDbWithServerIfNeeded({ silentIfDenied: false });
 
     const savedToken = localStorage.getItem("bd_token");
     if (savedToken) {
@@ -744,6 +783,7 @@ function bindAllUIEvents() {
     $("btn-expand-stage").onclick = () => {
         const expanded = $("media-stage").classList.toggle("expanded");
         $("btn-expand-stage").textContent = expanded ? "Küçült" : "Genişlet";
+        updateStageLayout();
     };
 
     // Ses DSP, Tema & Overlay Ayarları
@@ -882,12 +922,13 @@ function bindAllUIEvents() {
         const data = await window.electronAPI.dbLoad();
         if (!data) return showToast("Bilgisayarda kayıtlı DB dosyası bulunamadı.", "err");
         const secret = $("db-backup-secret-inp").value.trim();
-        socket.emit("restore-db", { db: data, backupSecret: secret }, (res) => {
+        const savedToken = localStorage.getItem("bd_token") || "";
+        socket.emit("restore-db", { db: data, backupSecret: secret, sessionToken: savedToken }, (res) => {
             if (res?.ok) {
                 showToast(
                     res.migratedFromV4
                         ? "v4.0 PC veritabanı v5.x'e dönüştürülerek yüklendi!"
-                        : "PC veritabanı sunucuya yüklendi!",
+                        : `PC veritabanı sunucuya yüklendi (${res.userCount || Object.keys(data.users || {}).length} üye).`,
                     "ok"
                 );
             } else {
@@ -916,12 +957,13 @@ function bindAllUIEvents() {
             try {
                 const parsed = JSON.parse(reader.result);
                 const secret = $("db-backup-secret-inp").value.trim();
-                socket.emit("restore-db", { db: parsed, backupSecret: secret }, (res) => {
+                const savedToken = localStorage.getItem("bd_token") || "";
+                socket.emit("restore-db", { db: parsed, backupSecret: secret, sessionToken: savedToken }, (res) => {
                     if (res?.ok) {
                         showToast(
                             res.migratedFromV4
                                 ? "v4.0 JSON yedeği v5.x formatına dönüştürülerek geri yüklendi!"
-                                : "JSON veritabanı geri yüklendi!",
+                                : `JSON veritabanı geri yüklendi (${res.userCount || Object.keys(parsed.users || {}).length} üye).`,
                             "ok"
                         );
                     } else {
@@ -1008,6 +1050,7 @@ socket.on("server-info", (info) => {
 });
 
 socket.on("db-sync", (fullDB) => {
+    if (!fullDB || fullDB.meta?.seededOnly) return;
     state.latestServerDB = fullDB;
     if (isElectron && state.me?.isGlobalAdmin) {
         window.electronAPI.dbSave(fullDB).catch(() => { });
@@ -1017,6 +1060,10 @@ socket.on("db-sync", (fullDB) => {
 socket.on("my-servers-update", (list) => {
     state.myServers = Array.isArray(list) ? list : [];
     renderServerRail();
+});
+
+socket.on("server-snapshot-refresh", (snap) => {
+    if (snap) applyServerSnapshot(snap);
 });
 
 socket.on("server-state-update", (srvState) => {

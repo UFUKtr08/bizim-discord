@@ -71,6 +71,7 @@ app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
 
 const DB_DIR = path.join(app.getPath("documents"), "BizimDiscord_DB");
 const LOCAL_DB_PATH = path.join(DB_DIR, "bizim_discord_db.json");
+const LOCAL_DB_BAK_PATH = path.join(DB_DIR, "bizim_discord_db.bak.json");
 
 let mainWin = null;
 let overlayWin = null;
@@ -79,6 +80,26 @@ let lastOverlayState = { active: false, channelName: "", users: [] };
 
 function ensureLocalDBDir() {
     if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
+}
+
+function countDbMetrics(dbObj) {
+    if (!dbObj || typeof dbObj !== "object") {
+        return { users: 0, servers: 0, messages: 0, seededOnly: true };
+    }
+    const users = Object.keys(dbObj.users || {}).length;
+    const servers = Object.keys(dbObj.servers || {}).length;
+    let messages = 0;
+    for (const srv of Object.values(dbObj.servers || {})) {
+        for (const arr of Object.values(srv?.messages || {})) {
+            if (Array.isArray(arr)) messages += arr.length;
+        }
+    }
+    return {
+        users,
+        servers,
+        messages,
+        seededOnly: Boolean(dbObj.meta?.seededOnly)
+    };
 }
 
 function getOverlayDimensions(size) {
@@ -283,9 +304,37 @@ ipcMain.on("overlay-update-state", (_event, payload) => {
     syncOverlayVisibility();
 });
 
+// Zırhlı Yerel DB Yazımı: Daha az kullanıcılı veya sıfırlanmış sunucu verisi dolu yedeği asla ezemez
 ipcMain.handle("db-save", async (_event, data) => {
     try {
         ensureLocalDBDir();
+        if (!data || typeof data !== "object" || !data.users) {
+            return { ok: false, error: "Geçersiz DB verisi." };
+        }
+
+        let existing = null;
+        if (fs.existsSync(LOCAL_DB_PATH)) {
+            try {
+                existing = JSON.parse(fs.readFileSync(LOCAL_DB_PATH, "utf8"));
+            } catch { }
+        }
+
+        const incStats = countDbMetrics(data);
+        const curStats = countDbMetrics(existing);
+
+        if (existing && (curStats.users > 1 || curStats.messages > 0 || !curStats.seededOnly)) {
+            if (incStats.seededOnly || incStats.users < curStats.users) {
+                return {
+                    ok: false,
+                    blocked: true,
+                    reason: "Yerel yedek daha kapsamlı olduğu için ezilmedi."
+                };
+            }
+            try {
+                fs.writeFileSync(LOCAL_DB_BAK_PATH, JSON.stringify(existing, null, 2), "utf8");
+            } catch { }
+        }
+
         const serialized = JSON.stringify(data, null, 2);
         const tmpPath = LOCAL_DB_PATH + ".tmp";
         try {
@@ -300,13 +349,30 @@ ipcMain.handle("db-save", async (_event, data) => {
     }
 });
 
+// Ana dosya ve .bak yedeğini karşılaştırır, en dolu/sağlam olanı döndürür
 ipcMain.handle("db-load", async () => {
-    try {
-        if (!fs.existsSync(LOCAL_DB_PATH)) return null;
-        return JSON.parse(fs.readFileSync(LOCAL_DB_PATH, "utf8"));
-    } catch {
-        return null;
-    }
+    const readValid = (filePath) => {
+        try {
+            if (!fs.existsSync(filePath)) return null;
+            const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+            return parsed && typeof parsed === "object" && parsed.users ? parsed : null;
+        } catch {
+            return null;
+        }
+    };
+
+    const primary = readValid(LOCAL_DB_PATH);
+    const backup = readValid(LOCAL_DB_BAK_PATH);
+    if (!primary) return backup;
+    if (!backup) return primary;
+
+    const pStats = countDbMetrics(primary);
+    const bStats = countDbMetrics(backup);
+
+    if (pStats.seededOnly && !bStats.seededOnly) return backup;
+    if (bStats.users > pStats.users) return backup;
+    if (bStats.users === pStats.users && bStats.messages > pStats.messages) return backup;
+    return primary;
 });
 
 ipcMain.handle("db-path", async () => LOCAL_DB_PATH);
@@ -401,7 +467,7 @@ function createWindow() {
     </style></head>
     <body>
       <div class="spinner"></div>
-      <h2>BizimDiscord v5.2 Başlatılıyor...</h2>
+      <h2>BizimDiscord v5.2.1 Başlatılıyor...</h2>
       <p>Sunucu uyku modundaysa uyanması 20-30 saniye sürebilir. Hazır olduğunda otomatik bağlanacak.</p>
       <div id="st" class="status">Sunucu kontrol ediliyor...</div>
     </body>

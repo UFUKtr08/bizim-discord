@@ -9,6 +9,7 @@ const {
     APP_VERSION,
     setIO,
     getDB,
+    initCloudDB,
     activeUsers,
     soundboardCooldown,
     getClientIp,
@@ -135,6 +136,12 @@ io.on("connection", (socket) => {
     });
 });
 
-server.listen(PORT, () => {
-    console.log(`BizimDiscord v${APP_VERSION} hazır: http://localhost:${PORT}`);
-});
+// Bulut Gist yedeğini (tanımlıysa) istemci kabul etmeden önce yükle
+async function bootstrap() {
+    await initCloudDB();
+    server.listen(PORT, () => {
+        console.log(`BizimDiscord v${APP_VERSION} hazır: http://localhost:${PORT}`);
+    });
+}
+
+bootstrap();

@@ -6,17 +6,22 @@ const PORT = process.env.PORT || 3000;
 const ALLOWED_ORIGIN = (process.env.ALLOWED_ORIGIN || "").trim();
 const DB_FILE = path.join(__dirname, "..", "data.json");
 const SERVER_STARTED_AT = Date.now();
-const APP_VERSION = "5.2.0";
+const APP_VERSION = "5.2.1";
 
 const ENV_ADMIN_USER = (process.env.ADMIN_USER || "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "");
 const ENV_ADMIN_PASS = (process.env.ADMIN_PASS || "").trim();
 const ENV_DEFAULT_INVITE = (process.env.DEFAULT_INVITE_CODE || "").trim().toUpperCase();
 const BACKUP_SECRET = (process.env.BACKUP_SECRET || "").trim();
 
-// Opsiyonel Render Ortam Değişkeni TURN Desteği (virgülle birden fazla URL destekler)
+// Opsiyonel Render Ortam Değişkeni TURN Desteği
 const ENV_TURN_URL = (process.env.TURN_URL || "").trim();
 const ENV_TURN_USER = (process.env.TURN_USER || "").trim();
 const ENV_TURN_PASS = (process.env.TURN_PASS || "").trim();
+
+// Opsiyonel Ücretsiz Özel GitHub Gist Bulut Kalıcılık Desteği
+const GIST_ID = (process.env.GITHUB_GIST_ID || process.env.GIST_ID || "").trim();
+const GITHUB_TOKEN = (process.env.GITHUB_TOKEN || process.env.GIST_TOKEN || "").trim();
+const GIST_FILENAME = (process.env.GIST_FILENAME || "bizim_discord_db.json").trim();
 
 const DEFAULT_ICE = [
     { urls: "stun:stun.l.google.com:19302" },
@@ -131,7 +136,6 @@ function sanitizeColor(color, fallback = "#5865f2") {
     return typeof color === "string" && /^#[0-9a-fA-F]{6}$/.test(color) ? color : fallback;
 }
 
-// XSS (SVG vb.) engellemek için yalnızca güvenli raster görsel formatlarına izin ver
 function isSafeRasterDataUrl(str, maxChars = 1800000) {
     if (typeof str !== "string" || str.length === 0 || str.length > maxChars) return false;
     return /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(str);
@@ -281,7 +285,7 @@ function extractYouTubeId(rawUrl) {
 }
 
 // =========================================================================
-// VERİTABANI OLUŞTURMA & v4.0 -> v5.x OTOMATİK MİGRASYON
+// VERİTABANI OLUŞTURMA, v4->v5 MİGRASYON, YETİM ÜYE ONARIMI & BİRLEŞTİRME
 // =========================================================================
 function createDefaultDB() {
     const mainServer = createServerObject({
@@ -343,16 +347,18 @@ function migrateV4ToV5(raw) {
 
     for (const [uname, u] of Object.entries(rawUsers)) {
         if (!u || !u.salt || !u.hash) continue;
+        const cleanUname = String(uname).trim().toLowerCase();
+        if (!cleanUname) continue;
         const isOldAdmin = u.role === "admin";
-        if (isOldAdmin && !primaryOwner) primaryOwner = uname;
-        users[uname] = {
+        if (isOldAdmin && !primaryOwner) primaryOwner = cleanUname;
+        users[cleanUname] = {
             salt: u.salt,
             hash: u.hash,
             recoverySalt: u.recoverySalt || null,
             recoveryHash: u.recoveryHash || null,
             role: isOldAdmin ? "admin" : "user",
             isGlobalAdmin: isOldAdmin,
-            displayName: typeof u.displayName === "string" && u.displayName.trim() ? u.displayName.trim().slice(0, 28) : uname,
+            displayName: typeof u.displayName === "string" && u.displayName.trim() ? u.displayName.trim().slice(0, 28) : cleanUname,
             color: sanitizeColor(u.color, "#5865f2"),
             status: typeof u.status === "string" && u.status.trim() ? u.status.trim().slice(0, 40) : "Çevrimiçi",
             avatar: sanitizeAvatar(u.avatar)
@@ -451,7 +457,8 @@ function normalizeServer(srvId, rawSrv, validUsers) {
 
     base.members = {};
     if (rawSrv?.members && typeof rawSrv.members === "object") {
-        for (const [uname, m] of Object.entries(rawSrv.members)) {
+        for (const [rawUname, m] of Object.entries(rawSrv.members)) {
+            const uname = String(rawUname).trim().toLowerCase();
             if (!validUsers[uname]) continue;
             const roleIds = Array.isArray(m?.roleIds)
                 ? [...new Set(m.roleIds.filter((rid) => validRoleIds.has(rid)))]
@@ -463,6 +470,7 @@ function normalizeServer(srvId, rawSrv, validUsers) {
         }
     }
 
+    if (base.ownerId) base.ownerId = String(base.ownerId).trim().toLowerCase();
     if (base.ownerId && !validUsers[base.ownerId]) {
         base.ownerId = Object.keys(base.members)[0] || null;
     }
@@ -519,19 +527,36 @@ function ensureEnvAdminAndIntegrity(dbObj) {
         }
     }
 
+    // Hiçbir sunucuya bağlı görünmeyen kayıtlı kullanıcıları (örn. hako) otomatik varsayılan sunucuya bağla
+    const allServers = Object.values(dbObj.servers);
+    const defaultMemberRole = defSrv.roles[defSrv.roles.length - 1]?.id || "role-member";
+    const adminRole = defSrv.roles[0]?.id || defaultMemberRole;
+    for (const [uname, uRec] of Object.entries(dbObj.users)) {
+        const inAnyServer = allServers.some((s) => Boolean(s.members && s.members[uname]));
+        if (!inAnyServer) {
+            defSrv.members[uname] = {
+                roleIds: [uRec?.isGlobalAdmin ? adminRole : defaultMemberRole],
+                joinedAt: Date.now()
+            };
+        }
+    }
+
     return dbObj;
 }
 
 function normalizeSessionEntry(entry, validUsers) {
     const now = Date.now();
     if (typeof entry === "string") {
-        if (!validUsers[entry]) return null;
-        return { username: entry, expiresAt: now + SESSION_TTL_MS };
+        const u = entry.trim().toLowerCase();
+        if (!validUsers[u]) return null;
+        return { username: u, expiresAt: now + SESSION_TTL_MS };
     }
-    if (entry && typeof entry === "object" && entry.username && validUsers[entry.username]) {
+    if (entry && typeof entry === "object" && entry.username) {
+        const u = String(entry.username).trim().toLowerCase();
+        if (!validUsers[u]) return null;
         const exp = Number(entry.expiresAt) || (now + SESSION_TTL_MS);
         if (exp <= now) return null;
-        return { username: entry.username, expiresAt: exp };
+        return { username: u, expiresAt: exp };
     }
     return null;
 }
@@ -546,8 +571,10 @@ function normalizeDB(raw) {
 
     const users = {};
     if (raw.users && typeof raw.users === "object") {
-        for (const [uname, u] of Object.entries(raw.users)) {
+        for (const [rawUname, u] of Object.entries(raw.users)) {
             if (!u || !u.salt || !u.hash) continue;
+            const uname = String(rawUname).trim().toLowerCase();
+            if (!uname) continue;
             const isGlobal = Boolean(u.isGlobalAdmin || u.role === "admin");
             users[uname] = {
                 salt: u.salt,
@@ -606,6 +633,89 @@ function normalizeDB(raw) {
     return ensureEnvAdminAndIntegrity(normalized);
 }
 
+function getDBSummary(dbObj) {
+    if (!dbObj || typeof dbObj !== "object") {
+        return { users: 0, servers: 0, messages: 0, seededOnly: true };
+    }
+    const users = Object.keys(dbObj.users || {}).length;
+    const servers = Object.keys(dbObj.servers || {}).length;
+    let messages = 0;
+    for (const srv of Object.values(dbObj.servers || {})) {
+        for (const arr of Object.values(srv?.messages || {})) {
+            if (Array.isArray(arr)) messages += arr.length;
+        }
+    }
+    return {
+        users,
+        servers,
+        messages,
+        seededOnly: Boolean(dbObj.meta?.seededOnly)
+    };
+}
+
+// Yedek geri yüklenirken sunucuda arada oluşmuş yeni kullanıcıları, oturumları ve mesajları kaybetmeden birleştirir
+function mergeOrRestoreDB(incomingRaw) {
+    const prevDB = db;
+    const nextDB = normalizeDB(incomingRaw);
+
+    if (prevDB && prevDB.users) {
+        const defSrv = nextDB.servers[nextDB.globalSettings.defaultServerId] || Object.values(nextDB.servers)[0];
+        const fallbackRole = defSrv?.roles?.[defSrv.roles.length - 1]?.id || "role-member";
+
+        for (const [uname, uRec] of Object.entries(prevDB.users)) {
+            if (!nextDB.users[uname] && uRec?.salt && uRec?.hash) {
+                nextDB.users[uname] = { ...uRec };
+                if (defSrv && !defSrv.members[uname]) {
+                    defSrv.members[uname] = { roleIds: [fallbackRole], joinedAt: Date.now() };
+                }
+            }
+        }
+
+        for (const [tok, sEntry] of Object.entries(prevDB.sessions || {})) {
+            if (!nextDB.sessions[tok] && nextDB.users[sEntry?.username]) {
+                nextDB.sessions[tok] = sEntry;
+            }
+        }
+
+        for (const [srvId, prevSrv] of Object.entries(prevDB.servers || {})) {
+            const targetSrv = nextDB.servers[srvId];
+            if (!targetSrv) continue;
+            for (const [chId, prevMsgs] of Object.entries(prevSrv.messages || {})) {
+                if (!Array.isArray(prevMsgs) || !prevMsgs.length) continue;
+                if (!Array.isArray(targetSrv.messages[chId])) targetSrv.messages[chId] = [];
+                const existingIds = new Set(targetSrv.messages[chId].map((m) => m.id));
+                for (const m of prevMsgs) {
+                    if (m?.id && !existingIds.has(m.id)) {
+                        targetSrv.messages[chId].push(m);
+                        existingIds.add(m.id);
+                    }
+                }
+                if (targetSrv.messages[chId].length > 200) {
+                    targetSrv.messages[chId] = targetSrv.messages[chId].slice(-200);
+                }
+            }
+        }
+
+        for (const [key, prevDms] of Object.entries(prevDB.dms || {})) {
+            if (!Array.isArray(prevDms) || !prevDms.length) continue;
+            if (!Array.isArray(nextDB.dms[key])) nextDB.dms[key] = [];
+            const existingIds = new Set(nextDB.dms[key].map((m) => m.id));
+            for (const m of prevDms) {
+                if (m?.id && !existingIds.has(m.id)) {
+                    nextDB.dms[key].push(m);
+                    existingIds.add(m.id);
+                }
+            }
+            if (nextDB.dms[key].length > 100) {
+                nextDB.dms[key] = nextDB.dms[key].slice(-100);
+            }
+        }
+    }
+
+    nextDB.meta.seededOnly = false;
+    return ensureEnvAdminAndIntegrity(nextDB);
+}
+
 function loadDB() {
     if (!fs.existsSync(DB_FILE)) {
         const initial = createDefaultDB();
@@ -636,6 +746,138 @@ function setDB(nextDb) {
 }
 
 // =========================================================================
+// ÜCRETSİZ ÖZEL GITHUB GIST BULUT KALICILIK MOTORU (OPSİYONEL)
+// =========================================================================
+let cloudPushTimer = null;
+let cloudPushInFlight = false;
+let cloudPushPending = false;
+let cloudReady = false;
+
+function isCloudEnabled() {
+    return Boolean(GIST_ID && GITHUB_TOKEN);
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function initCloudDB() {
+    if (!isCloudEnabled()) {
+        cloudReady = false;
+        return db;
+    }
+
+    try {
+        const res = await fetchWithTimeout(`https://api.github.com/gists/${encodeURIComponent(GIST_ID)}`, {
+            headers: {
+                Authorization: `Bearer ${GITHUB_TOKEN}`,
+                Accept: "application/vnd.github+json",
+                "User-Agent": "BizimDiscord-Server"
+            }
+        }, 9000);
+
+        if (!res.ok) {
+            console.error(`[CloudDB] Gist okunamadı (HTTP ${res.status})`);
+            cloudReady = true;
+            return db;
+        }
+
+        const gist = await res.json();
+        const files = gist?.files || {};
+        const fileObj = files[GIST_FILENAME] || Object.values(files).find((f) => f && f.filename?.endsWith(".json"));
+        let rawText = fileObj?.content || "";
+
+        if (fileObj?.truncated && fileObj?.raw_url) {
+            const rawRes = await fetchWithTimeout(fileObj.raw_url, {
+                headers: {
+                    Authorization: `Bearer ${GITHUB_TOKEN}`,
+                    "User-Agent": "BizimDiscord-Server"
+                }
+            }, 9000);
+            if (rawRes.ok) rawText = await rawRes.text();
+        }
+
+        if (rawText && rawText.trim().startsWith("{")) {
+            const parsed = JSON.parse(rawText);
+            if (parsed && parsed.users && Object.keys(parsed.users).length > 0) {
+                const cloudDB = normalizeDB(parsed);
+                cloudDB.meta.seededOnly = false;
+                db = cloudDB;
+                await fs.promises.writeFile(DB_FILE, JSON.stringify(db, null, 2), "utf8");
+                console.log(`[CloudDB] GitHub Gist'ten yüklendi (${Object.keys(db.users).length} kullanıcı, ${Object.keys(db.servers).length} sunucu).`);
+            } else {
+                console.log("[CloudDB] Gist henüz boş; ilk gerçek kayıtta senkronize edilecek.");
+            }
+        }
+        cloudReady = true;
+    } catch (err) {
+        console.error("[CloudDB] Başlangıç yükleme hatası:", err.message);
+        cloudReady = true;
+    }
+
+    return db;
+}
+
+async function pushCloudDBNow() {
+    if (!isCloudEnabled() || !cloudReady) return;
+    const sum = getDBSummary(db);
+    // Boş/sıfırlanmış varsayılan DB asla bulut yedeğinin üzerine yazılmaz
+    if (sum.seededOnly && sum.users <= 1 && sum.messages === 0) return;
+
+    if (cloudPushInFlight) {
+        cloudPushPending = true;
+        return;
+    }
+
+    cloudPushInFlight = true;
+    try {
+        const res = await fetchWithTimeout(`https://api.github.com/gists/${encodeURIComponent(GIST_ID)}`, {
+            method: "PATCH",
+            headers: {
+                Authorization: `Bearer ${GITHUB_TOKEN}`,
+                Accept: "application/vnd.github+json",
+                "Content-Type": "application/json",
+                "User-Agent": "BizimDiscord-Server"
+            },
+            body: JSON.stringify({
+                files: {
+                    [GIST_FILENAME]: {
+                        content: JSON.stringify(db, null, 2)
+                    }
+                }
+            })
+        }, 10000);
+
+        if (!res.ok) {
+            console.error(`[CloudDB] Gist yazma hatası (HTTP ${res.status})`);
+        }
+    } catch (err) {
+        console.error("[CloudDB] Gist yazma hatası:", err.message);
+    } finally {
+        cloudPushInFlight = false;
+        if (cloudPushPending) {
+            cloudPushPending = false;
+            scheduleCloudPush(4000);
+        }
+    }
+}
+
+function scheduleCloudPush(delayMs = 4000) {
+    if (!isCloudEnabled() || !cloudReady) return;
+    if (cloudPushTimer) clearTimeout(cloudPushTimer);
+    cloudPushTimer = setTimeout(() => {
+        cloudPushTimer = null;
+        pushCloudDBNow();
+    }, delayMs);
+}
+
+// =========================================================================
 // ASENKRON + DEBOUNCED DB YAZIMI & GLOBAL ADMIN SENKRONİZASYONU
 // =========================================================================
 let saveTimer = null;
@@ -650,6 +892,7 @@ let lastCpuSampleTime = Date.now();
 
 function emitDbSyncToGlobalAdmins() {
     if (!ioRef) return;
+    if (db.meta?.seededOnly) return;
     for (const [sid, au] of activeUsers.entries()) {
         if (db.users[au.username]?.isGlobalAdmin) {
             ioRef.to(sid).emit("db-sync", db);
@@ -685,6 +928,7 @@ async function flushDBToDiskNow() {
 
 function saveAndSyncDB({ immediateDisk = false } = {}) {
     emitDbSyncToGlobalAdmins();
+    scheduleCloudPush(immediateDisk ? 1200 : 4000);
     if (immediateDisk) {
         if (saveTimer) {
             clearTimeout(saveTimer);
@@ -941,7 +1185,8 @@ function buildServerPublicSettings(srv, includePrivate = false) {
         afkTimeoutSec: srv.afkTimeoutSec ?? 300,
         iceServers: getServerIceServers(srv),
         hasTurnConfigured: hasSrvTurn || hasEnvTurn,
-        hasEnvTurn
+        hasEnvTurn,
+        cloudSyncEnabled: isCloudEnabled()
     };
     if (includePrivate) {
         base.turnServer = { ...srv.turnServer };
@@ -1076,7 +1321,7 @@ function computeDynamicLoadSnapshot() {
         recommendation = "Tek odada 11+ kişi veya %80+ RAM baskısı var. Ücretsiz/düşük maliyetli bir VPS (2 vCPU / 4 GB RAM) + LiveKit SFU ve PostgreSQL'e geçiş önerilir.";
     } else if (strainScore >= 45 || ramPct >= 60 || maxRoomVoice >= 7) {
         level = "Orta (Dikkat)";
-        recommendation = "Kamera/ekran paylaşımı artarsa upload veya RAM sınırına yaklaşılır. 360p/480p kamera, 720p30 ekran paylaşımı ve kalıcı PostgreSQL yedeği kullan.";
+        recommendation = "Kamera/ekran paylaşımı artarsa upload veya RAM sınırına yaklaşılır. 360p/480p kamera, 720p30 ekran paylaşımı ve kalıcı bulut yedeği kullan.";
     }
 
     return {
@@ -1099,6 +1344,7 @@ function computeDynamicLoadSnapshot() {
         registeredUsers: Object.keys(db.users).length,
         serverCount: Object.keys(db.servers).length,
         hasEnvTurn: Boolean(ENV_TURN_URL),
+        cloudSyncEnabled: isCloudEnabled(),
         strainScore,
         level,
         recommendation
@@ -1119,6 +1365,8 @@ module.exports = {
     getIO,
     getDB,
     setDB,
+    initCloudDB,
+    isCloudEnabled,
     saveAndSyncDB,
     activeUsers,
     serverRuntime,
@@ -1139,6 +1387,8 @@ module.exports = {
     extractYouTubeId,
     normalizeSessionEntry,
     normalizeDB,
+    getDBSummary,
+    mergeOrRestoreDB,
     getRuntime,
     getServerIceServers,
     getMemberRoles,
