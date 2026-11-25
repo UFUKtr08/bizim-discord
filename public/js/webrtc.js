@@ -13,8 +13,123 @@ import {
 } from "./audio.js";
 
 // =========================================================================
-// CANLI VIDEO SAHNESİ (ÇOKLU EKRAN & KAMERA IZGARA + SPOTLIGHT)
+// CANLI VIDEO SAHNESİ (DISCORD TARZI ORANTILI BEST-FIT IZGARA & SPOTLIGHT)
 // =========================================================================
+let stageResizeObserver = null;
+let stageLayoutRaf = null;
+
+function ensureStageObserver() {
+    if (stageResizeObserver) return;
+    const tilesWrap = $("stage-tiles");
+    if (!tilesWrap || typeof ResizeObserver === "undefined") return;
+    stageResizeObserver = new ResizeObserver(() => {
+        scheduleStageLayout();
+    });
+    stageResizeObserver.observe(tilesWrap);
+}
+
+function scheduleStageLayout() {
+    if (stageLayoutRaf) return;
+    stageLayoutRaf = requestAnimationFrame(() => {
+        stageLayoutRaf = null;
+        layoutStageTiles();
+    });
+}
+
+function clampAspectRatio(rawRatio) {
+    if (!Number.isFinite(rawRatio) || rawRatio <= 0) return 16 / 9;
+    return Math.max(0.48, Math.min(2.45, rawRatio));
+}
+
+function syncTileAspectFromVideo(tile, vid) {
+    if (!tile || !vid) return;
+    if (vid.videoWidth > 0 && vid.videoHeight > 0) {
+        const ratio = clampAspectRatio(vid.videoWidth / vid.videoHeight);
+        const prev = parseFloat(tile.dataset.ratio || "0");
+        if (Math.abs(prev - ratio) > 0.01) {
+            tile.dataset.ratio = String(ratio);
+            scheduleStageLayout();
+        }
+    }
+}
+
+export function layoutStageTiles() {
+    const stage = $("media-stage");
+    const tilesWrap = $("stage-tiles");
+    if (!stage || !tilesWrap || !stage.classList.contains("active")) return;
+
+    const visibleTiles = Array.from(tilesWrap.querySelectorAll(".video-tile:not(.hidden-in-spot)"));
+    if (!visibleTiles.length) return;
+
+    const W = tilesWrap.clientWidth;
+    const H = tilesWrap.clientHeight;
+    if (W < 40 || H < 40) {
+        scheduleStageLayout();
+        return;
+    }
+
+    const N = visibleTiles.length;
+    const gap = N === 1 ? 0 : 10;
+    const ratios = visibleTiles.map((t) => clampAspectRatio(parseFloat(t.dataset.ratio || String(16 / 9))));
+
+    let bestCols = 1;
+    let bestArea = -1;
+    let bestSizes = [];
+
+    for (let cols = 1; cols <= N; cols++) {
+        const rows = Math.ceil(N / cols);
+        const cellW = Math.floor((W - gap * (cols - 1)) / cols);
+        const cellH = Math.floor((H - gap * (rows - 1)) / rows);
+        if (cellW < 60 || cellH < 45) continue;
+
+        let totalArea = 0;
+        const sizes = [];
+
+        for (let i = 0; i < N; i++) {
+            const r = ratios[i];
+            let w;
+            let h;
+            if (cellW / cellH > r) {
+                h = cellH;
+                w = Math.floor(h * r);
+            } else {
+                w = cellW;
+                h = Math.floor(w / r);
+            }
+            w = Math.max(60, Math.min(cellW, w));
+            h = Math.max(45, Math.min(cellH, h));
+            totalArea += w * h;
+            sizes.push({ w, h });
+        }
+
+        if (totalArea > bestArea) {
+            bestArea = totalArea;
+            bestCols = cols;
+            bestSizes = sizes;
+        }
+    }
+
+    if (!bestSizes.length) {
+        const fallbackW = Math.max(120, Math.floor(W));
+        const fallbackH = Math.max(90, Math.floor(H));
+        bestCols = 1;
+        bestSizes = ratios.map((r) => {
+            if (fallbackW / fallbackH > r) return { w: Math.floor(fallbackH * r), h: fallbackH };
+            return { w: fallbackW, h: Math.floor(fallbackW / r) };
+        });
+    }
+
+    tilesWrap.style.gridTemplateColumns = `repeat(${bestCols}, auto)`;
+    tilesWrap.style.gap = `${gap}px`;
+
+    visibleTiles.forEach((tile, idx) => {
+        const sz = bestSizes[idx];
+        if (!sz) return;
+        tile.style.width = `${sz.w}px`;
+        tile.style.height = `${sz.h}px`;
+    });
+}
+
 export function updateStageLayout() {
     const stage = $("media-stage");
     const tilesWrap = $("stage-tiles");
@@ -26,10 +141,13 @@ export function updateStageLayout() {
         stage.classList.remove("active", "expanded");
         state.spotlightTileId = null;
         if ($("btn-exit-spotlight")) $("btn-exit-spotlight").style.display = "none";
+        if ($("btn-expand-stage")) $("btn-expand-stage").textContent = "Genişlet";
         return;
     }
 
     stage.classList.add("active");
+    ensureStageObserver();
+
     if ($("stage-count-lbl")) {
         $("stage-count-lbl").textContent = `Canlı Sahne (${tiles.length} yayın)`;
     }
@@ -46,6 +164,8 @@ export function updateStageLayout() {
         const tid = t.id.replace(/^tile-/, "");
         t.classList.toggle("hidden-in-spot", Boolean(state.spotlightTileId && tid !== state.spotlightTileId));
     });
+
+    scheduleStageLayout();
 }
 
 export function toggleSpotlight(tileKey) {
@@ -61,6 +181,7 @@ export function showMediaTile(tileKey, label, stream, { kind = "cam", isLocal = 
         tile.id = id;
         tile.className = "video-tile";
         tile.dataset.tileKind = kind;
+        tile.dataset.ratio = String(16 / 9);
         tile.onclick = () => toggleSpotlight(tileKey);
 
         const video = document.createElement("video");
@@ -70,11 +191,29 @@ export function showMediaTile(tileKey, label, stream, { kind = "cam", isLocal = 
         if (kind === "cam") video.classList.add("cover");
         if (isLocal && kind === "cam" && state.mirrorCam) video.classList.add("mirrored");
 
+        video.addEventListener("loadedmetadata", () => syncTileAspectFromVideo(tile, video));
+        video.addEventListener("resize", () => syncTileAspectFromVideo(tile, video));
+
+        const fsBtn = document.createElement("button");
+        fsBtn.type = "button";
+        fsBtn.className = "tile-fs-btn";
+        fsBtn.title = "Tam Ekran";
+        fsBtn.textContent = "⛶";
+        fsBtn.onclick = (e) => {
+            e.stopPropagation();
+            if (document.fullscreenElement === tile) {
+                document.exitFullscreen?.().catch(() => { });
+            } else {
+                tile.requestFullscreen?.().catch(() => { });
+            }
+        };
+
         const lbl = document.createElement("div");
         lbl.className = "tile-label";
         lbl.textContent = label;
 
         tile.appendChild(video);
+        tile.appendChild(fsBtn);
         tile.appendChild(lbl);
         $("stage-tiles")?.appendChild(tile);
     }
@@ -85,17 +224,26 @@ export function showMediaTile(tileKey, label, stream, { kind = "cam", isLocal = 
         vid.classList.toggle("cover", kind === "cam");
         if (isLocal && kind === "cam") vid.classList.toggle("mirrored", state.mirrorCam);
         vid.play().catch(() => { });
+
+        const vTrack = stream?.getVideoTracks?.()[0];
+        const ts = vTrack?.getSettings?.();
+        if (ts?.width > 0 && ts?.height > 0) {
+            tile.dataset.ratio = String(clampAspectRatio(ts.width / ts.height));
+        }
+        syncTileAspectFromVideo(tile, vid);
     }
     const lblEl = tile.querySelector(".tile-label");
     if (lblEl) lblEl.textContent = label;
 
-    // Çoklu ekran paylaşımında yeni yayın diğerlerini gizlemesin; tüm yayınlar ızgarada görünür
     updateStageLayout();
 }
 
 export function removeMediaTile(tileKey) {
     const tile = document.getElementById("tile-" + tileKey);
     if (tile) {
+        if (document.fullscreenElement === tile) {
+            document.exitFullscreen?.().catch(() => { });
+        }
         const vid = tile.querySelector("video");
         if (vid) {
             try {
@@ -177,7 +325,6 @@ function applyRemoteTrackMeta(peerId, peer, meta) {
         streams: { ...(meta.streams || {}) }
     };
 
-    // Karşı taraf meta'da artık cam veya screen göndermiyorsa kutusunu hemen kapat
     const activeKinds = new Set([
         ...Object.values(peer.remoteMeta.mids),
         ...Object.values(peer.remoteMeta.tracks)
@@ -321,7 +468,6 @@ function ensureLocalTracksAttached(peerId, peer) {
         }
     }
 
-    // Rollback sonrası ekli ama henüz müzakere edilmemiş (currentDirection send içermeyen) video sender var mı?
     if (!changed && peer.pc.signalingState === "stable") {
         const checkUnnegotiated = (sender) => {
             if (!sender || !sender.track) return false;
@@ -495,7 +641,6 @@ export function getOrCreatePeer(peerId) {
             const tileKey = `${tileKind}-${peerId}`;
             const icon = tileKind === "screen" ? "🖥️" : "📹";
 
-            // Tek video track izole MediaStream ile verilir ki cam & screen çakışmasın
             const videoOnlyStream = new MediaStream([e.track]);
             showMediaTile(tileKey, `${icon} ${name}`, videoOnlyStream, { kind: tileKind, isLocal: false });
 
@@ -530,7 +675,6 @@ export function getOrCreatePeer(peerId) {
         }
     };
 
-    // Mevcut yerel mikrofon / kamera / ekran track'lerini hemen ekle
     ensureLocalTracksAttached(peerId, peer);
 
     return peer;
@@ -573,7 +717,6 @@ export function handleIncomingOffer(from, offer) {
                 }
             });
 
-            // Eğer gelen offer ses-odaklıydı ama bizde aktif kamera/ekran varsa hemen re-offer tetikle
             ensureLocalTracksAttached(from, peer);
             if (peer.needsNegotiation && peer.pc.signalingState === "stable") {
                 scheduleNegotiation(from, false);
@@ -620,7 +763,6 @@ export function handlePeerJoinedVoice({ peerId, serverId, channelId }) {
     if (!peerId || peerId === socket.id) return;
     if (serverId !== state.voiceServerId || channelId !== state.voiceChannelId) return;
 
-    // Yeni katılan kişi için peer'ı aç; aktif kamera/ekran varsa onnegotiationneeded anında offer yollar
     const peer = getOrCreatePeer(peerId);
     ensureLocalTracksAttached(peerId, peer);
 }
@@ -713,7 +855,6 @@ export async function joinVoiceChannel(serverId, channelId) {
         }
         state.hasTurnConfigured = Boolean(res.hasTurnConfigured);
 
-        // Odadaki mevcut kullanıcıların kamera/ekran bilgilerini ilk ontrack'ten ÖNCE önbelleğe al
         if (state.voiceServerId === state.activeServerId) {
             refreshVoiceMembersCacheFrom(state.members);
         }
@@ -828,7 +969,6 @@ export async function toggleCamera() {
         return showToast("Kamera açılamadı: " + err.message, "err");
     }
 
-    // Açılma sırasında kullanıcı kamerayı iptal ettiyse veya ses odasından çıktıysa hemen durdur
     if (attemptId !== state.camAttemptId || !state.voiceChannelId) {
         stream.getTracks().forEach((t) => t.stop());
         state.camBusy = false;
@@ -923,7 +1063,6 @@ export function stopCamera(silent = false) {
     }
 
     if (!silent) {
-        // Çift güvence: hem durum güncellemesi hem cam-stopped gönder (hayalet kamera ikonu kalmaz)
         socket.emit("voice-status-update", { camOn: false, camStreamId: null });
         if (hadStream) socket.emit("cam-stopped");
     }
