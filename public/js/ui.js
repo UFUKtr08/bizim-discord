@@ -26,8 +26,106 @@ import {
     openDmWith
 } from "./tools.js";
 
+// Sürükle-bırak ses kanalı taşıma durumu
+let draggedVoiceMember = null;
+
+function clearVoiceDropHighlights() {
+    document.querySelectorAll(".voice-drop-target").forEach((el) => el.classList.remove("voice-drop-target"));
+    document.querySelectorAll(".voice-dragging").forEach((el) => el.classList.remove("voice-dragging"));
+}
+
+function canDragMemberBetweenVoice(m) {
+    if (!state.me || !m || !m.online || !m.voiceChannel) return false;
+    const isSelf = m.username === state.me.username;
+    if (isSelf) return true;
+    const canMovePerm = Boolean(state.myPermissions.administrator || state.myPermissions.moveMembers);
+    return canMovePerm && canActOn(m);
+}
+
+function attachVoiceDragSource(el, m) {
+    if (!canDragMemberBetweenVoice(m)) return;
+    el.draggable = true;
+    el.classList.add("voice-draggable");
+    el.title = el.title
+        ? `${el.title} • Başka ses kanalına sürükle-bırak`
+        : "Başka ses kanalına taşımak için sürükle-bırak";
+
+    el.addEventListener("dragstart", (e) => {
+        draggedVoiceMember = {
+            username: m.username,
+            displayName: m.displayName || m.username,
+            fromChannelId: m.voiceChannel
+        };
+        el.classList.add("voice-dragging");
+        if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+            try {
+                e.dataTransfer.setData("text/plain", JSON.stringify(draggedVoiceMember));
+            } catch { }
+        }
+    });
+
+    el.addEventListener("dragend", () => {
+        draggedVoiceMember = null;
+        clearVoiceDropHighlights();
+    });
+}
+
+function attachVoiceDropTarget(targetEl, highlightEl, destChannel) {
+    targetEl.addEventListener("dragover", (e) => {
+        if (!draggedVoiceMember) return;
+        if (draggedVoiceMember.fromChannelId === destChannel.id) return;
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+        highlightEl.classList.add("voice-drop-target");
+    });
+
+    targetEl.addEventListener("dragleave", (e) => {
+        if (!targetEl.contains(e.relatedTarget)) {
+            highlightEl.classList.remove("voice-drop-target");
+        }
+    });
+
+    targetEl.addEventListener("drop", (e) => {
+        e.preventDefault();
+        highlightEl.classList.remove("voice-drop-target");
+
+        let payload = draggedVoiceMember;
+        if (!payload && e.dataTransfer) {
+            try {
+                payload = JSON.parse(e.dataTransfer.getData("text/plain"));
+            } catch { }
+        }
+        draggedVoiceMember = null;
+        clearVoiceDropHighlights();
+
+        if (!payload || !payload.username || payload.fromChannelId === destChannel.id) return;
+
+        if (state.me && payload.username === state.me.username) {
+            joinVoiceChannel(state.activeServerId, destChannel.id);
+            return;
+        }
+
+        socket.emit(
+            "member-move-voice",
+            {
+                serverId: state.activeServerId,
+                targetUsername: payload.username,
+                targetChannelId: destChannel.id
+            },
+            (res) => {
+                if (!res?.ok) {
+                    showToast(res?.error || "Üye taşınamadı.", "err");
+                } else {
+                    showToast(`${payload.displayName} → "${destChannel.name}" kanalına taşındı.`, "info");
+                }
+            }
+        );
+    });
+}
+
 // =========================================================================
-// BAĞLAM MENÜSÜ, POPOVER & AYAR SEKMELERİ
+// BAĞLAM MENÜSÜ, POPOVER, DURUM SEÇİCİ & AYAR SEKMELERİ
 // =========================================================================
 export function closeContextMenu() {
     $("context-menu")?.classList.remove("show");
@@ -69,6 +167,23 @@ export function openContextMenu(x, y, items) {
     menu.style.top = `${Math.max(8, top)}px`;
 }
 
+export function openPresenceMenu(x, y) {
+    const pick = (presence, label) => {
+        socket.emit("set-presence", { presence }, (res) => {
+            if (!res?.ok) return showToast(res?.error || "Durum değiştirilemedi.", "err");
+            if (state.me) state.me.presence = res.presence;
+            applyMeUI();
+            showToast(`Durumun "${label}" olarak ayarlandı.`, "ok", 2200);
+        });
+    };
+
+    openContextMenu(x, y, [
+        { label: "Çevrimiçi", icon: "🟢", onClick: () => pick("online", "Çevrimiçi") },
+        { label: "Meşgul", icon: "🔴", onClick: () => pick("dnd", "Meşgul") },
+        { label: "Çevrimdışı (Görünmez)", icon: "⚫", onClick: () => pick("offline", "Çevrimdışı") }
+    ]);
+}
+
 export function activateSettingsTab(tabId) {
     document.querySelectorAll("#settings-modal .tab-btn").forEach((b) => {
         b.classList.toggle("active", b.dataset.tab === tabId);
@@ -90,8 +205,43 @@ export function showGeneratedRecoveryCode(code) {
 export function applyMeUI() {
     if (!state.me) return;
     if ($("me-name")) $("me-name").textContent = state.me.displayName || state.me.username;
-    if ($("me-status")) $("me-status").textContent = state.me.status || "Çevrimiçi";
     renderAvatarContent($("me-avatar"), state.me);
+
+    const presence = state.me.presence || "online";
+    const meAv = $("me-avatar");
+    if (meAv) {
+        meAv.style.position = "relative";
+        meAv.style.overflow = "visible";
+        let myDot = $("me-presence-dot");
+        if (!myDot) {
+            myDot = document.createElement("span");
+            myDot.id = "me-presence-dot";
+            meAv.appendChild(myDot);
+        }
+        myDot.className = "presence-dot " + presence;
+        meAv.title = "Durumu değiştirmek için tıkla";
+        meAv.style.cursor = "pointer";
+        meAv.onclick = (e) => {
+            e.stopPropagation();
+            const r = meAv.getBoundingClientRect();
+            openPresenceMenu(r.left, r.top - 125);
+        };
+    }
+
+    const stLbl = $("me-status");
+    if (stLbl) {
+        const pMap = { online: "🟢 Çevrimiçi", dnd: "🔴 Meşgul", offline: "⚫ Çevrimdışı" };
+        const pTxt = pMap[presence] || "🟢 Çevrimiçi";
+        const customStatus = state.me.status && state.me.status !== "Çevrimiçi" ? ` • ${state.me.status}` : "";
+        stLbl.textContent = pTxt + customStatus;
+        stLbl.title = "Durumu değiştirmek için tıkla";
+        stLbl.style.cursor = "pointer";
+        stLbl.onclick = (e) => {
+            e.stopPropagation();
+            const r = stLbl.getBoundingClientRect();
+            openPresenceMenu(r.left, r.top - 125);
+        };
+    }
 
     if ($("prof-display-name")) $("prof-display-name").value = state.me.displayName || state.me.username;
     if ($("prof-color")) $("prof-color").value = state.me.color || "#5865f2";
@@ -279,7 +429,7 @@ export function confirmLeaveServer(serverId, name) {
 }
 
 // =========================================================================
-// KANAL LİSTESİ & SAĞ TIK / UZUN BASMA BAĞLAM MENÜSÜ
+// KANAL LİSTESİ & SÜRÜKLE-BIRAK SES KANALI TAŞIMA
 // =========================================================================
 export function renderChannels() {
     const textUl = $("text-channels");
@@ -383,12 +533,17 @@ export function renderChannels() {
         if (ch.type === "text") {
             textUl.appendChild(li);
         } else {
+            // Ses kanalı bırakma hedefi
+            attachVoiceDropTarget(li, li, ch);
             voiceUl.appendChild(li);
 
             const occupants = state.members.filter((m) => m.online && m.voiceChannel === ch.id);
             if (occupants.length) {
                 const occUl = document.createElement("ul");
                 occUl.className = "voice-occupants";
+                // Kanal altındaki üye listesine bırakınca da bu ses kanalına taşı
+                attachVoiceDropTarget(occUl, li, ch);
+
                 occupants.forEach((m) => {
                     const occLi = document.createElement("li");
                     const isSpk = m.id && state.speakingMap.get(m.id);
@@ -416,6 +571,8 @@ export function renderChannels() {
                     occLi.appendChild(av);
                     occLi.appendChild(nm);
                     if (fParts.length) occLi.appendChild(flags);
+
+                    attachVoiceDragSource(occLi, m);
 
                     occLi.oncontextmenu = (e) => {
                         e.preventDefault();
@@ -535,15 +692,15 @@ export function renderActiveChannelHeader() {
 }
 
 // =========================================================================
-// ÜYE LİSTESİ (ROL ETİKETLERİ & KİŞİ BAŞI %0-%200 HİBRİT SES)
+// ÜYE LİSTESİ (DURUM IŞIKLARI, SUNUCU TAKMA AD, SÜRÜKLE-BIRAK & SES)
 // =========================================================================
 export function renderMembers() {
     const ul = $("user-list");
     if (!ul) return;
     ul.innerHTML = "";
 
-    const onlineList = state.members.filter((m) => m.online);
-    const offlineList = state.members.filter((m) => !m.online);
+    const onlineList = state.members.filter((m) => m.online && m.presence !== "offline");
+    const offlineList = state.members.filter((m) => !m.online || m.presence === "offline");
     if ($("online-count")) $("online-count").textContent = String(onlineList.length);
 
     const renderSection = (title, list) => {
@@ -554,8 +711,11 @@ export function renderMembers() {
         ul.appendChild(hdr);
 
         list.forEach((m) => {
+            const isVisibleOnline = m.online && m.presence !== "offline";
+            const presenceClass = m.online ? (m.presence || "online") : "offline";
+
             const li = document.createElement("li");
-            li.className = "member-card" + (m.online ? "" : " offline");
+            li.className = "member-card" + (isVisibleOnline ? "" : " offline");
 
             const mainRow = document.createElement("div");
             mainRow.className = "member-main";
@@ -570,7 +730,13 @@ export function renderMembers() {
             renderAvatarContent(av, m);
 
             const pDot = document.createElement("span");
-            pDot.className = "presence-dot" + (m.online ? "" : " offline");
+            pDot.className = "presence-dot " + presenceClass;
+            pDot.title =
+                presenceClass === "dnd"
+                    ? "Meşgul"
+                    : presenceClass === "online"
+                        ? "Çevrimiçi"
+                        : "Çevrimdışı";
 
             avWrap.appendChild(av);
             avWrap.appendChild(pDot);
@@ -585,6 +751,9 @@ export function renderMembers() {
             nameEl.className = "member-name";
             nameEl.textContent = m.displayName || m.username;
             nameEl.style.color = m.topRole?.color || m.color || "";
+            nameEl.title = m.nickname
+                ? `Sunucu Takma Adı • @${m.username} (${m.globalDisplayName || m.username})`
+                : `@${m.username}`;
             nameRow.appendChild(nameEl);
 
             const flags = [];
@@ -623,16 +792,25 @@ export function renderMembers() {
                 info.appendChild(roleBadge);
             }
 
-            if (m.online && m.status && m.status !== "Çevrimiçi") {
+            if (isVisibleOnline && (presenceClass === "dnd" || (m.status && m.status !== "Çevrimiçi"))) {
                 const stEl = document.createElement("div");
                 stEl.className = "member-status-sub";
-                stEl.textContent = m.status;
+                if (presenceClass === "dnd") {
+                    stEl.textContent = m.status && m.status !== "Çevrimiçi" ? `Meşgul • ${m.status}` : "Meşgul";
+                } else {
+                    stEl.textContent = m.status;
+                }
                 info.appendChild(stEl);
             }
 
             mainRow.appendChild(avWrap);
             mainRow.appendChild(info);
             li.appendChild(mainRow);
+
+            // Ses kanalındaysa sağ üye listesinden de sürükleyip sol ses kanalına bırakılabilir
+            if (m.online && m.voiceChannel) {
+                attachVoiceDragSource(li, m);
+            }
 
             const inSameVoice =
                 m.online &&
@@ -696,6 +874,12 @@ export function openMemberContextMenu(x, y, m) {
             icon: "💬",
             onClick: () => openDmWith(m.username)
         });
+    } else {
+        items.push({
+            label: "Durumunu Değiştir (🟢/🔴/⚫)",
+            icon: "🟢",
+            onClick: () => openPresenceMenu(x, y)
+        });
     }
 
     const canManageRoles = Boolean(state.myPermissions.administrator || state.myPermissions.manageRoles);
@@ -706,6 +890,40 @@ export function openMemberContextMenu(x, y, m) {
             label: "Rollerini Yönet",
             icon: "🏷️",
             onClick: () => openMemberRolesModal(m)
+        });
+    }
+
+    const canNickPerm = Boolean(
+        state.myPermissions.administrator ||
+        state.myPermissions.manageNicknames ||
+        state.myPermissions.manageServer
+    );
+    const canSetNick =
+        (canNickPerm && canActOn(m)) ||
+        (state.isServerOwner && m.username === state.me.username);
+    if (canSetNick) {
+        items.push({
+            label: m.nickname ? `Sunucu Takma Adını Düzenle (${m.nickname})` : "Sunucu Takma Adı Ver",
+            icon: "✏️",
+            onClick: () => {
+                const nextNick = prompt(
+                    `${m.globalDisplayName || m.username} için bu sunucudaki takma adı gir (sıfırlamak için boş bırak):`,
+                    m.nickname || ""
+                );
+                if (nextNick === null) return;
+                socket.emit(
+                    "member-set-nickname",
+                    {
+                        serverId: state.activeServerId,
+                        targetUsername: m.username,
+                        nickname: nextNick.trim()
+                    },
+                    (res) => {
+                        if (!res?.ok) showToast(res?.error || "Takma ad güncellenemedi.", "err");
+                        else showToast(res.nickname ? `Takma ad "${res.nickname}" yapıldı.` : "Sunucu takma adı sıfırlandı.", "ok");
+                    }
+                );
+            }
         });
     }
 

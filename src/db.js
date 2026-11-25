@@ -6,7 +6,7 @@ const PORT = process.env.PORT || 3000;
 const ALLOWED_ORIGIN = (process.env.ALLOWED_ORIGIN || "").trim();
 const DB_FILE = path.join(__dirname, "..", "data.json");
 const SERVER_STARTED_AT = Date.now();
-const APP_VERSION = "5.2.1";
+const APP_VERSION = "5.3.0";
 
 const ENV_ADMIN_USER = (process.env.ADMIN_USER || "").trim().toLowerCase().replace(/[^a-z0-9._-]/g, "");
 const ENV_ADMIN_PASS = (process.env.ADMIN_PASS || "").trim();
@@ -19,7 +19,10 @@ const ENV_TURN_USER = (process.env.TURN_USER || "").trim();
 const ENV_TURN_PASS = (process.env.TURN_PASS || "").trim();
 
 // Opsiyonel Ücretsiz Özel GitHub Gist Bulut Kalıcılık Desteği
-const GIST_ID = (process.env.GITHUB_GIST_ID || process.env.GIST_ID || "").trim();
+const RAW_GIST_ID = (process.env.GITHUB_GIST_ID || process.env.GIST_ID || "").trim();
+const GIST_ID = RAW_GIST_ID.includes("/")
+    ? RAW_GIST_ID.replace(/\/+$/, "").split("/").pop()
+    : RAW_GIST_ID;
 const GITHUB_TOKEN = (process.env.GITHUB_TOKEN || process.env.GIST_TOKEN || "").trim();
 const GIST_FILENAME = (process.env.GIST_FILENAME || "bizim_discord_db.json").trim();
 
@@ -35,6 +38,8 @@ const PERMISSION_KEYS = [
     "manageRoles",
     "kickMembers",
     "muteMembers",
+    "moveMembers",
+    "manageNicknames",
     "pinMessages",
     "deleteMessages",
     "manageServer"
@@ -168,6 +173,8 @@ function makeDefaultRoles() {
                 manageRoles: true,
                 kickMembers: true,
                 muteMembers: true,
+                moveMembers: true,
+                manageNicknames: true,
                 pinMessages: true,
                 deleteMessages: true,
                 manageServer: true
@@ -184,6 +191,8 @@ function makeDefaultRoles() {
                 manageRoles: false,
                 kickMembers: true,
                 muteMembers: true,
+                moveMembers: true,
+                manageNicknames: true,
                 pinMessages: true,
                 deleteMessages: true,
                 manageServer: false
@@ -200,6 +209,8 @@ function makeDefaultRoles() {
                 manageRoles: false,
                 kickMembers: false,
                 muteMembers: false,
+                moveMembers: false,
+                manageNicknames: false,
                 pinMessages: false,
                 deleteMessages: false,
                 manageServer: false
@@ -331,6 +342,7 @@ function createDefaultDB() {
         mainServer.ownerId = ENV_ADMIN_USER;
         mainServer.members[ENV_ADMIN_USER] = {
             roleIds: ["role-admin"],
+            nickname: "",
             joinedAt: Date.now()
         };
     }
@@ -384,6 +396,7 @@ function migrateV4ToV5(raw) {
     for (const [uname, u] of Object.entries(users)) {
         mainServer.members[uname] = {
             roleIds: u.isGlobalAdmin ? ["role-admin"] : ["role-member"],
+            nickname: "",
             joinedAt: Date.now()
         };
     }
@@ -465,6 +478,7 @@ function normalizeServer(srvId, rawSrv, validUsers) {
                 : [];
             base.members[uname] = {
                 roleIds: roleIds.length ? roleIds : [lowestRoleId],
+                nickname: typeof m?.nickname === "string" ? m.nickname.trim().slice(0, 28) : "",
                 joinedAt: Number(m?.joinedAt) || Date.now()
             };
         }
@@ -475,7 +489,7 @@ function normalizeServer(srvId, rawSrv, validUsers) {
         base.ownerId = Object.keys(base.members)[0] || null;
     }
     if (base.ownerId && !base.members[base.ownerId]) {
-        base.members[base.ownerId] = { roleIds: [base.roles[0].id], joinedAt: Date.now() };
+        base.members[base.ownerId] = { roleIds: [base.roles[0].id], nickname: "", joinedAt: Date.now() };
     }
 
     base.polls = Array.isArray(rawSrv?.polls) ? rawSrv.polls.slice(-15) : [];
@@ -523,11 +537,11 @@ function ensureEnvAdminAndIntegrity(dbObj) {
         if (!defSrv.ownerId) defSrv.ownerId = ENV_ADMIN_USER;
         if (!defSrv.members[ENV_ADMIN_USER]) {
             const topRole = defSrv.roles[0]?.id || "role-admin";
-            defSrv.members[ENV_ADMIN_USER] = { roleIds: [topRole], joinedAt: Date.now() };
+            defSrv.members[ENV_ADMIN_USER] = { roleIds: [topRole], nickname: "", joinedAt: Date.now() };
         }
     }
 
-    // Hiçbir sunucuya bağlı görünmeyen kayıtlı kullanıcıları (örn. hako) otomatik varsayılan sunucuya bağla
+    // Hiçbir sunucuya bağlı görünmeyen kayıtlı kullanıcıları otomatik varsayılan sunucuya bağla
     const allServers = Object.values(dbObj.servers);
     const defaultMemberRole = defSrv.roles[defSrv.roles.length - 1]?.id || "role-member";
     const adminRole = defSrv.roles[0]?.id || defaultMemberRole;
@@ -536,6 +550,7 @@ function ensureEnvAdminAndIntegrity(dbObj) {
         if (!inAnyServer) {
             defSrv.members[uname] = {
                 roleIds: [uRec?.isGlobalAdmin ? adminRole : defaultMemberRole],
+                nickname: "",
                 joinedAt: Date.now()
             };
         }
@@ -653,7 +668,6 @@ function getDBSummary(dbObj) {
     };
 }
 
-// Yedek geri yüklenirken sunucuda arada oluşmuş yeni kullanıcıları, oturumları ve mesajları kaybetmeden birleştirir
 function mergeOrRestoreDB(incomingRaw) {
     const prevDB = db;
     const nextDB = normalizeDB(incomingRaw);
@@ -666,7 +680,7 @@ function mergeOrRestoreDB(incomingRaw) {
             if (!nextDB.users[uname] && uRec?.salt && uRec?.hash) {
                 nextDB.users[uname] = { ...uRec };
                 if (defSrv && !defSrv.members[uname]) {
-                    defSrv.members[uname] = { roleIds: [fallbackRole], joinedAt: Date.now() };
+                    defSrv.members[uname] = { roleIds: [fallbackRole], nickname: "", joinedAt: Date.now() };
                 }
             }
         }
@@ -827,7 +841,6 @@ async function initCloudDB() {
 async function pushCloudDBNow() {
     if (!isCloudEnabled() || !cloudReady) return;
     const sum = getDBSummary(db);
-    // Boş/sıfırlanmış varsayılan DB asla bulut yedeğinin üzerine yazılmaz
     if (sum.seededOnly && sum.users <= 1 && sum.messages === 0) return;
 
     if (cloudPushInFlight) {
@@ -856,6 +869,8 @@ async function pushCloudDBNow() {
 
         if (!res.ok) {
             console.error(`[CloudDB] Gist yazma hatası (HTTP ${res.status})`);
+        } else {
+            console.log(`[CloudDB] GitHub Gist güncellendi (${sum.users} kullanıcı).`);
         }
     } catch (err) {
         console.error("[CloudDB] Gist yazma hatası:", err.message);
@@ -1109,7 +1124,7 @@ function getUserServersList(username) {
         let onlineCount = 0;
         let voiceCount = 0;
         for (const au of activeUsers.values()) {
-            if (srv.members[au.username]) onlineCount++;
+            if (srv.members[au.username] && au.presence !== "offline") onlineCount++;
             if (au.voiceServerId === srv.id && au.voiceChannel) voiceCount++;
         }
         list.push({
@@ -1139,15 +1154,23 @@ function buildServerMembersPayload(srv) {
         const topRole = getMemberTopRole(srv, uname);
         const power = getMemberPower(srv, uname);
         const inThisServerVoice = online && online.voiceServerId === srv.id ? online.voiceChannel : null;
+        const isConnected = Boolean(online);
+        const presence = isConnected ? (online.presence || "online") : "offline";
+        const appearsOnline = isConnected && presence !== "offline";
+        const srvNick = typeof m.nickname === "string" ? m.nickname.trim() : "";
 
         list.push({
             id: online ? online.socketId : null,
             username: uname,
-            displayName: record.displayName || uname,
+            displayName: srvNick || record.displayName || uname,
+            globalDisplayName: record.displayName || uname,
+            nickname: srvNick,
             color: record.color || "#5865f2",
             avatar: record.avatar || "",
             status: record.status || "Çevrimiçi",
-            online: Boolean(online),
+            online: isConnected,
+            appearsOnline,
+            presence,
             isOwner: srv.ownerId === uname,
             roleIds: m.roleIds || [],
             topRole,
@@ -1164,7 +1187,7 @@ function buildServerMembersPayload(srv) {
     }
 
     list.sort((a, b) => {
-        if (a.online !== b.online) return a.online ? -1 : 1;
+        if (a.appearsOnline !== b.appearsOnline) return a.appearsOnline ? -1 : 1;
         if (a.power !== b.power) return b.power - a.power;
         return a.username.localeCompare(b.username, "tr");
     });

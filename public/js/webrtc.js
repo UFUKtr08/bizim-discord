@@ -257,7 +257,6 @@ export function removeMediaTile(tileKey) {
     updateStageLayout();
 }
 
-// Sunucu durumuyla uzak kamera/ekran kutularını senkronize et (hayalet kutuları temizle)
 export function reconcileRemoteMediaWithMembers(memberList) {
     if (!state.voiceChannelId) return;
     const activeIdsInVoice = new Set();
@@ -366,7 +365,7 @@ function resolveRemoteTrackKind(peerId, peer, track, stream, transceiver) {
 }
 
 // =========================================================================
-// VİDEO KALİTE / BITRATE / CONTENT HINT (DISCORD OPTİMİZASYONU)
+// VİDEO KALİTE / BITRATE / CONTENT HINT
 // =========================================================================
 export function getCamConstraints() {
     const q = parseInt($("cam-quality")?.value, 10) || 480;
@@ -470,7 +469,6 @@ function ensureLocalTracksAttached(peerId, peer) {
         }
     }
 
-    // Rollback veya geç katılım sonrası müzakere edilmemiş (mikrofon dahil) gönderici varsa yakala
     if (!changed && peer.pc.signalingState === "stable") {
         const checkUnnegotiated = (sender) => {
             if (!sender || !sender.track) return false;
@@ -693,7 +691,6 @@ export function getOrCreatePeer(peerId, { autoAttach = true } = {}) {
 
 export function handleIncomingOffer(from, offer) {
     if (!state.voiceChannelId || !from || !offer) return;
-    // Gelen offer'da önce tracksiz peer açılır ki setRemoteDescription sonrası mikrofon doğrudan sendrecv bağlansın
     const peer = getOrCreatePeer(from, { autoAttach: false });
     if (peer.joinFallbackTimer) {
         clearTimeout(peer.joinFallbackTimer);
@@ -719,7 +716,6 @@ export function handleIncomingOffer(from, offer) {
             await peer.pc.setRemoteDescription(cleanOffer);
             await flushCandidates(peer);
 
-            // Mikrofonu createAnswer'dan önce bağla -> tek turda çift yönlü (sendrecv) ses kurulur
             attachLocalMicOnly(peer);
 
             const answer = await peer.pc.createAnswer();
@@ -736,7 +732,6 @@ export function handleIncomingOffer(from, offer) {
                 }
             });
 
-            // Mikrofon zaten answer ile müzakere edildi; yalnızca aktif kamera/ekran veya eksik gönderici varsa re-offer at
             peer.needsNegotiation = false;
             ensureLocalTracksAttached(from, peer);
         } catch { }
@@ -781,7 +776,6 @@ export function handlePeerJoinedVoice({ peerId, serverId, channelId }) {
     if (!peerId || peerId === socket.id) return;
     if (serverId !== state.voiceServerId || channelId !== state.voiceChannelId) return;
 
-    // İlk offer'ı yeni katılan kişi atar (glare olmaz). 3 sn içinde gelmezse yedek olarak biz başlatırız.
     const peer = getOrCreatePeer(peerId, { autoAttach: false });
     if (peer.joinFallbackTimer) clearTimeout(peer.joinFallbackTimer);
     peer.joinFallbackTimer = setTimeout(() => {
@@ -942,27 +936,41 @@ export function leaveVoiceCleanup(notifyServer = true) {
     pushOverlayState(true);
 }
 
-export async function handleVoiceAfkMoved({ serverId, channelId, channelName, reason, peers: targetPeers }) {
+export async function handleVoiceAfkMoved({ serverId, channelId, channelName, isAfkChannel, reason, movedBy, peers: targetPeers, peerStates }) {
     stopCamera(true);
     stopScreenShare(true);
     for (const pid of Array.from(state.peers.keys())) closePeer(pid);
 
     state.voiceServerId = serverId;
     state.voiceChannelId = channelId;
-    state.selfMuted = true;
+    if (isAfkChannel || reason === "auto-afk" || reason === "manual-afk") {
+        state.selfMuted = true;
+    }
     state.turnAlertShownForChannel = false;
+
+    if (state.voiceServerId === state.activeServerId) {
+        refreshVoiceMembersCacheFrom(state.members);
+    }
+    if (Array.isArray(peerStates)) {
+        for (const ps of peerStates) {
+            const prev = state.voiceMembersCache.get(ps.id) || {};
+            state.voiceMembersCache.set(ps.id, { ...prev, ...ps });
+        }
+    }
+
     applyMuteState();
     updateVoicePanelUI();
     hooks.renderChannels();
-    playTone(300, 0.14, "triangle", 0.08);
+    playTone(reason === "moved" ? 620 : 300, 0.12, "triangle", 0.08);
 
-    showToast(
+    const msg =
         reason === "auto-afk"
             ? `Uzun süre sessiz kaldığınız için "${channelName}" odasına taşındınız.`
-            : `Bir yetkili sizi "${channelName}" odasına taşıdı.`,
-        "info",
-        4500
-    );
+            : reason === "moved"
+                ? `${movedBy || "Bir yetkili"} sizi "${channelName}" ses kanalına taşıdı.`
+                : `${movedBy || "Bir yetkili"} sizi "${channelName}" odasına taşıdı.`;
+
+    showToast(msg, "info", 4500);
 
     for (const pid of targetPeers || []) {
         sendOfferToPeer(pid, false);
@@ -970,7 +978,7 @@ export async function handleVoiceAfkMoved({ serverId, channelId, channelName, re
 }
 
 // =========================================================================
-// KAMERA PAYLAŞIMI (YARIŞ KORUMALI & HAYALET İKONSUZ)
+// KAMERA PAYLAŞIMI
 // =========================================================================
 export function updateCamButtonsUI(on) {
     $("btn-cam")?.classList.toggle("on", on);
@@ -1098,7 +1106,7 @@ export function stopCamera(silent = false) {
 }
 
 // =========================================================================
-// EKRAN PAYLAŞIMI (DISCORD MODELİ: AYRI VİDEO + AYRI SİSTEM SESİ)
+// EKRAN PAYLAŞIMI
 // =========================================================================
 export async function openScreenShareFlow() {
     if (!state.voiceChannelId) return showToast("Ekran paylaşmak için önce bir ses kanalına katıl.", "info");

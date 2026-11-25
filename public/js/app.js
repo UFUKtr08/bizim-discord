@@ -121,6 +121,67 @@ hooks.closeToolsPopover = closeToolsPopover;
 hooks.openDmWith = openDmWith;
 
 // =========================================================================
+// EKSİK HTML ÖĞELERİNİ OTOMATİK ENJEKTE ET (📎, GİRİŞ DURUMU, YENİ YETKİLER)
+// =========================================================================
+function ensureDynamicUIControls() {
+    // 1) Dosya yükleme (📎) butonu yoksa #btn-img yanına otomatik oluştur
+    if (!$("btn-file") && $("btn-img")) {
+        const btnFile = document.createElement("button");
+        btnFile.type = "button";
+        btnFile.id = "btn-file";
+        btnFile.className = $("btn-img").className || "icon-btn";
+        btnFile.title = "Dosya Gönder (Maks 10 MB)";
+        btnFile.textContent = "📎";
+        $("btn-img").insertAdjacentElement("afterend", btnFile);
+    }
+    if (!$("file-input") && $("btn-file")) {
+        const fInp = document.createElement("input");
+        fInp.type = "file";
+        fInp.id = "file-input";
+        fInp.hidden = true;
+        $("btn-file").insertAdjacentElement("afterend", fInp);
+    }
+
+    // 2) Beni Hatırla kutucuğunu varsayılan işaretli yap
+    if ($("auth-remember")) {
+        $("auth-remember").checked = true;
+    }
+
+    // 3) Giriş ekranına varsayılanı Yeşil (Çevrimiçi) olan giriş durum seçicisi ekle
+    if (!$("auth-presence") && $("btn-login")) {
+        const wrap = document.createElement("div");
+        wrap.className = "auth-presence-row";
+        wrap.innerHTML = `
+            <label for="auth-presence" style="font-size:12px;color:var(--text-muted);">Giriş Durumu:</label>
+            <select id="auth-presence" class="auth-presence-select">
+                <option value="online" selected>🟢 Çevrimiçi (Varsayılan)</option>
+                <option value="dnd">🔴 Meşgul</option>
+                <option value="offline">⚫ Çevrimdışı (Görünmez)</option>
+            </select>
+        `;
+        $("btn-login").parentElement.insertBefore(wrap, $("btn-login"));
+    }
+
+    // 4) Rol düzenleyicisinde moveMembers ve manageNicknames kutucukları yoksa otomatik ekle
+    const anyPermChk = document.querySelector(".role-perm-chk");
+    const permContainer = anyPermChk?.closest("label")?.parentElement;
+    if (permContainer) {
+        const extras = [
+            { key: "moveMembers", label: "Üyeleri Ses Kanalından Kanala Taşı (Sürükle-Bırak)" },
+            { key: "manageNicknames", label: "Alt Yetkililere Sunucu Takma Adı Ver" }
+        ];
+        extras.forEach(({ key, label }) => {
+            if (!document.querySelector(`.role-perm-chk[data-perm="${key}"]`)) {
+                const lbl = document.createElement("label");
+                lbl.className = "check-row";
+                lbl.innerHTML = `<input type="checkbox" class="role-perm-chk" data-perm="${key}" /> <span>${label}</span>`;
+                permContainer.appendChild(lbl);
+            }
+        });
+    }
+}
+
+// =========================================================================
 // YEREL MASTER DB OTOMATİK GERİ YÜKLEME & MANUEL GİRİŞ SONRASI SENKRON
 // =========================================================================
 let localDbSyncInProgress = false;
@@ -222,7 +283,8 @@ async function bootSequence() {
 
     const savedToken = localStorage.getItem("bd_token");
     if (savedToken) {
-        socket.emit("login-token", savedToken, (res) => {
+        // Otomatik girişte aksini seçmediği için her zaman yeşil (online) başlar
+        socket.emit("login-token", { token: savedToken, initialPresence: "online" }, (res) => {
             if (res?.ok) {
                 handleLoginSuccess(res);
             } else if (res && res.ok === false) {
@@ -236,6 +298,8 @@ async function bootSequence() {
 // TÜM ARAYÜZ OLAY BAĞLANTILARI
 // =========================================================================
 function bindAllUIEvents() {
+    ensureDynamicUIControls();
+
     document.addEventListener("pointerdown", resumeAudioOnGesture, { passive: true });
     document.addEventListener("click", (e) => {
         if (!e.target.closest("#context-menu")) closeContextMenu();
@@ -326,8 +390,9 @@ function bindAllUIEvents() {
         const username = $("auth-user").value.trim();
         const password = $("auth-pass").value;
         const remember = $("auth-remember").checked;
+        const initialPresence = $("auth-presence")?.value || "online";
         $("auth-err").textContent = "";
-        socket.emit("login", { username, password, remember }, (res) => {
+        socket.emit("login", { username, password, remember, initialPresence }, (res) => {
             if (!res?.ok) $("auth-err").textContent = res?.error || "Giriş başarısız.";
             else handleLoginSuccess(res);
         });

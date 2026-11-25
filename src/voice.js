@@ -1,227 +1,212 @@
 const {
     getDB,
     activeUsers,
-    inSameVoiceChannel,
     getServerIceServers,
+    hasPerm,
+    canActOnMember,
+    inSameVoiceChannel,
     broadcastServerState
 } = require("./db");
 
-function moveSocketToVoiceChannel(io, socketId, serverId, targetChannelId, reason = "afk") {
-    const db = getDB();
-    const au = activeUsers.get(socketId);
-    const srv = db.servers[serverId];
-    if (!au || !srv) return;
+function buildPeerState(srv, sid, u) {
+    const nick = srv?.members?.[u.username]?.nickname || "";
+    return {
+        id: sid,
+        username: u.username,
+        displayName: nick || u.displayName || u.username,
+        camOn: Boolean(u.camOn),
+        camStreamId: u.camStreamId || null,
+        screenSharing: Boolean(u.screenSharing),
+        screenStreamId: u.screenStreamId || null,
+        selfMuted: Boolean(u.selfMuted),
+        serverMuted: Boolean(u.serverMuted),
+        deafened: Boolean(u.deafened)
+    };
+}
 
-    const oldServerId = au.voiceServerId;
-    const oldChannelId = au.voiceChannel;
+function cleanupVoiceOnDisconnect(io, socket, user) {
+    if (!user || !user.voiceServerId || !user.voiceChannel) return;
+    const oldSrvId = user.voiceServerId;
+    const oldChId = user.voiceChannel;
 
-    if (oldServerId && oldChannelId) {
-        io.to("srv:" + oldServerId).emit("user-left-voice", socketId);
-        io.to("srv:" + oldServerId).emit("voice-event", {
-            type: "leave",
-            serverId: oldServerId,
-            username: au.username,
-            displayName: au.displayName || au.username,
-            channelId: oldChannelId
-        });
-    }
+    user.voiceServerId = null;
+    user.voiceChannel = null;
+    user.camOn = false;
+    user.camStreamId = null;
+    user.screenSharing = false;
+    user.screenStreamId = null;
 
-    au.voiceServerId = serverId;
-    au.voiceChannel = targetChannelId;
-    au.selfMuted = true;
-    au.camOn = false;
-    au.camStreamId = null;
-    au.screenSharing = false;
-    au.screenStreamId = null;
-    au.lastVoiceActivityAt = Date.now();
-
-    const peersInTarget = [];
-    for (const [id, u] of activeUsers.entries()) {
-        if (id !== socketId && u.voiceServerId === serverId && u.voiceChannel === targetChannelId) {
-            peersInTarget.push(id);
+    for (const [sid, u] of activeUsers.entries()) {
+        if (sid !== socket.id && u.voiceServerId === oldSrvId && u.voiceChannel === oldChId) {
+            io.to(sid).emit("user-left-voice", socket.id);
         }
     }
 
-    const targetCh = srv.channels.find((c) => c.id === targetChannelId);
-    io.to(socketId).emit("voice-afk-moved", {
-        serverId,
-        channelId: targetChannelId,
-        channelName: targetCh?.name || "AFK",
-        reason,
-        peers: peersInTarget
+    io.to("srv:" + oldSrvId).emit("voice-event", {
+        type: "leave",
+        serverId: oldSrvId,
+        channelId: oldChId
     });
-
-    if (oldServerId && oldServerId !== serverId) {
-        broadcastServerState(oldServerId);
-    }
-    broadcastServerState(serverId);
+    broadcastServerState(oldSrvId);
 }
 
-let afkWatcherStarted = false;
+function moveMemberToVoiceChannel(io, srv, targetSid, targetUser, destCh, { reason = "moved", movedBy = "" } = {}) {
+    const oldChId = targetUser.voiceChannel;
+
+    for (const [sid, u] of activeUsers.entries()) {
+        if (sid !== targetSid && u.voiceServerId === srv.id && u.voiceChannel === oldChId) {
+            io.to(sid).emit("user-left-voice", targetSid);
+        }
+    }
+    io.to("srv:" + srv.id).emit("voice-event", {
+        type: "leave",
+        serverId: srv.id,
+        channelId: oldChId
+    });
+
+    const isAfkDest = Boolean(destCh.isAfk || srv.afkChannelId === destCh.id);
+    targetUser.voiceChannel = destCh.id;
+    targetUser.camOn = false;
+    targetUser.camStreamId = null;
+    targetUser.screenSharing = false;
+    targetUser.screenStreamId = null;
+    targetUser.lastVoiceActivityAt = Date.now();
+    if (isAfkDest) targetUser.selfMuted = true;
+
+    const destPeers = [];
+    const destPeerStates = [];
+    for (const [sid, u] of activeUsers.entries()) {
+        if (sid !== targetSid && u.voiceServerId === srv.id && u.voiceChannel === destCh.id) {
+            destPeers.push(sid);
+            destPeerStates.push(buildPeerState(srv, sid, u));
+            io.to(sid).emit("voice-peer-joined", {
+                peerId: targetSid,
+                serverId: srv.id,
+                channelId: destCh.id
+            });
+        }
+    }
+
+    io.to(targetSid).emit("voice-afk-moved", {
+        serverId: srv.id,
+        channelId: destCh.id,
+        channelName: destCh.name,
+        isAfkChannel: isAfkDest,
+        reason,
+        movedBy,
+        peers: destPeers,
+        peerStates: destPeerStates
+    });
+
+    io.to("srv:" + srv.id).emit("voice-event", {
+        type: "join",
+        serverId: srv.id,
+        channelId: destCh.id
+    });
+    broadcastServerState(srv.id);
+}
 
 function startAfkWatcher(io) {
-    if (afkWatcherStarted) return;
-    afkWatcherStarted = true;
-
     setInterval(() => {
         const db = getDB();
         const now = Date.now();
-        for (const [sid, au] of activeUsers.entries()) {
-            if (!au.voiceServerId || !au.voiceChannel) continue;
-            if (au.afkExempt) continue;
 
-            const srv = db.servers[au.voiceServerId];
+        for (const [sid, u] of activeUsers.entries()) {
+            if (!u.voiceServerId || !u.voiceChannel || u.afkExempt) continue;
+            const srv = db.servers[u.voiceServerId];
             if (!srv || !srv.afkChannelId || !srv.afkTimeoutSec || srv.afkTimeoutSec <= 0) continue;
-            if (au.voiceChannel === srv.afkChannelId) continue;
-            if (au.camOn || au.screenSharing) continue;
+            if (u.voiceChannel === srv.afkChannelId) continue;
 
-            const afkChannelExists = srv.channels.some((c) => c.id === srv.afkChannelId && c.type === "voice");
-            if (!afkChannelExists) continue;
+            const afkCh = srv.channels.find((c) => c.id === srv.afkChannelId && c.type === "voice");
+            if (!afkCh) continue;
 
-            const idleMs = now - (au.lastVoiceActivityAt || now);
+            const idleMs = now - (u.lastVoiceActivityAt || now);
             if (idleMs >= srv.afkTimeoutSec * 1000) {
-                moveSocketToVoiceChannel(io, sid, srv.id, srv.afkChannelId, "auto-afk");
+                moveMemberToVoiceChannel(io, srv, sid, u, afkCh, { reason: "auto-afk" });
             }
         }
     }, 15000);
 }
 
-function cleanupVoiceOnDisconnect(io, socket, user) {
-    const oldVoiceSrv = user.voiceServerId;
-    const oldVoiceCh = user.voiceChannel;
-    if (!oldVoiceSrv || !oldVoiceCh) return;
-
-    io.to("srv:" + oldVoiceSrv).emit("user-left-voice", socket.id);
-    io.to("srv:" + oldVoiceSrv).emit("voice-event", {
-        type: "leave",
-        serverId: oldVoiceSrv,
-        username: user.username,
-        displayName: user.displayName || user.username,
-        channelId: oldVoiceCh
-    });
-}
-
 function registerVoiceHandlers(io, socket) {
-    socket.on("join-voice", (payload, cb) => {
+    socket.on("join-voice", ({ serverId, channelId }, cb) => {
         const db = getDB();
         const user = activeUsers.get(socket.id);
-        if (!user) return cb?.({ ok: false, error: "Oturum bulunamadı." });
-
-        const serverId = typeof payload === "object" ? payload.serverId : user.activeServerId;
-        const channelId = typeof payload === "object" ? payload.channelId : payload;
-        const srv = db.servers[serverId];
-        if (!srv || !srv.members[user.username]) return cb?.({ ok: false, error: "Sunucu bulunamadı." });
+        const srv = serverId && db.servers[serverId];
+        if (!user || !srv || !srv.members[user.username]) {
+            return cb?.({ ok: false, error: "Bu sunucuya erişimin yok." });
+        }
 
         const ch = srv.channels.find((c) => c.id === channelId && c.type === "voice");
         if (!ch) return cb?.({ ok: false, error: "Ses kanalı bulunamadı." });
 
-        const prevServerId = user.voiceServerId;
-        const prevChannelId = user.voiceChannel;
-
-        if (prevServerId && prevChannelId) {
-            io.to("srv:" + prevServerId).emit("user-left-voice", socket.id);
-        }
-
-        const peersInChannel = [];
-        const peerStates = [];
-        for (const [id, u] of activeUsers.entries()) {
-            if (id !== socket.id && u.voiceServerId === serverId && u.voiceChannel === channelId) {
-                peersInChannel.push(id);
-                peerStates.push({
-                    id,
-                    username: u.username,
-                    displayName: u.displayName || u.username,
-                    camOn: Boolean(u.camOn),
-                    camStreamId: u.camStreamId || null,
-                    screenSharing: Boolean(u.screenSharing),
-                    screenStreamId: u.screenStreamId || null
-                });
+        if (user.voiceServerId && user.voiceChannel) {
+            if (user.voiceServerId === srv.id && user.voiceChannel === ch.id) {
+                return cb?.({ ok: false, error: "Zaten bu ses kanalındasın." });
             }
+            cleanupVoiceOnDisconnect(io, socket, user);
         }
 
-        user.voiceServerId = serverId;
-        user.voiceChannel = channelId;
+        const isAfkChannel = Boolean(ch.isAfk || srv.afkChannelId === ch.id);
+        user.voiceServerId = srv.id;
+        user.voiceChannel = ch.id;
         user.camOn = false;
         user.camStreamId = null;
         user.screenSharing = false;
         user.screenStreamId = null;
         user.lastVoiceActivityAt = Date.now();
+        if (isAfkChannel) user.selfMuted = true;
 
-        if (prevServerId && prevServerId !== serverId) {
-            broadcastServerState(prevServerId);
+        const peers = [];
+        const peerStates = [];
+        for (const [sid, u] of activeUsers.entries()) {
+            if (sid !== socket.id && u.voiceServerId === srv.id && u.voiceChannel === ch.id) {
+                peers.push(sid);
+                peerStates.push(buildPeerState(srv, sid, u));
+                io.to(sid).emit("voice-peer-joined", {
+                    peerId: socket.id,
+                    serverId: srv.id,
+                    channelId: ch.id
+                });
+            }
         }
-        broadcastServerState(serverId);
 
-        // Odadaki mevcut kullanıcılara yeni katılanı bildir (aktif kamera/ekran varsa re-offer tetikleyebilsin)
-        for (const pid of peersInChannel) {
-            io.to(pid).emit("voice-peer-joined", {
-                peerId: socket.id,
-                username: user.username,
-                displayName: user.displayName || user.username,
-                serverId,
-                channelId
-            });
-        }
-
-        socket.to("srv:" + serverId).emit("voice-event", {
+        io.to("srv:" + srv.id).emit("voice-event", {
             type: "join",
-            serverId,
-            username: user.username,
-            displayName: user.displayName || user.username,
-            channelId
+            serverId: srv.id,
+            channelId: ch.id
         });
+        broadcastServerState(srv.id);
 
+        const iceServers = getServerIceServers(srv);
         cb?.({
             ok: true,
-            peers: peersInChannel,
+            peers,
             peerStates,
-            iceServers: getServerIceServers(srv),
-            hasTurnConfigured: Boolean(
-                (srv.turnServer?.url && srv.turnServer.url.trim()) ||
-                (process.env.TURN_URL && process.env.TURN_URL.trim())
-            ),
-            isAfkChannel: Boolean(ch.isAfk || srv.afkChannelId === channelId)
+            iceServers,
+            hasTurnConfigured: iceServers.length > 3,
+            isAfkChannel
         });
     });
 
     socket.on("leave-voice", () => {
         const user = activeUsers.get(socket.id);
-        if (!user || !user.voiceChannel) return;
-        const oldSrv = user.voiceServerId;
-        const oldCh = user.voiceChannel;
-        user.voiceServerId = null;
-        user.voiceChannel = null;
-        user.camOn = false;
-        user.camStreamId = null;
-        user.screenSharing = false;
-        user.screenStreamId = null;
-
-        if (oldSrv) {
-            io.to("srv:" + oldSrv).emit("user-left-voice", socket.id);
-            socket.to("srv:" + oldSrv).emit("voice-event", {
-                type: "leave",
-                serverId: oldSrv,
-                username: user.username,
-                displayName: user.displayName || user.username,
-                channelId: oldCh
-            });
-            broadcastServerState(oldSrv);
-        }
+        if (user) cleanupVoiceOnDisconnect(io, socket, user);
     });
 
     socket.on("voice-status-update", (payload) => {
         const user = activeUsers.get(socket.id);
-        if (!user || !payload) return;
+        if (!user || !payload || typeof payload !== "object") return;
+
         if (typeof payload.selfMuted === "boolean") user.selfMuted = payload.selfMuted;
         if (typeof payload.deafened === "boolean") user.deafened = payload.deafened;
         if (typeof payload.camOn === "boolean") user.camOn = payload.camOn;
-        if (payload.camStreamId !== undefined) user.camStreamId = payload.camStreamId || null;
+        if (payload.camStreamId !== undefined) user.camStreamId = payload.camStreamId ? String(payload.camStreamId).slice(0, 80) : null;
         if (typeof payload.screenSharing === "boolean") user.screenSharing = payload.screenSharing;
-        if (payload.screenStreamId !== undefined) user.screenStreamId = payload.screenStreamId || null;
+        if (payload.screenStreamId !== undefined) user.screenStreamId = payload.screenStreamId ? String(payload.screenStreamId).slice(0, 80) : null;
+
         user.lastVoiceActivityAt = Date.now();
-        if (user.voiceServerId) {
-            broadcastServerState(user.voiceServerId);
-        }
+        if (user.voiceServerId) broadcastServerState(user.voiceServerId);
     });
 
     socket.on("voice-activity", () => {
@@ -229,7 +214,135 @@ function registerVoiceHandlers(io, socket) {
         if (user) user.lastVoiceActivityAt = Date.now();
     });
 
-    // --- WEBRTC SİNYALLEŞME (AYNI SES KANALI DOĞRULAMALI) ---
+    socket.on("cam-stopped", () => {
+        const user = activeUsers.get(socket.id);
+        if (!user || !user.voiceServerId || !user.voiceChannel) return;
+        user.camOn = false;
+        user.camStreamId = null;
+        for (const [sid, u] of activeUsers.entries()) {
+            if (sid !== socket.id && u.voiceServerId === user.voiceServerId && u.voiceChannel === user.voiceChannel) {
+                io.to(sid).emit("cam-stopped", socket.id);
+            }
+        }
+        broadcastServerState(user.voiceServerId);
+    });
+
+    socket.on("screen-share-stopped", () => {
+        const user = activeUsers.get(socket.id);
+        if (!user || !user.voiceServerId || !user.voiceChannel) return;
+        user.screenSharing = false;
+        user.screenStreamId = null;
+        for (const [sid, u] of activeUsers.entries()) {
+            if (sid !== socket.id && u.voiceServerId === user.voiceServerId && u.voiceChannel === user.voiceChannel) {
+                io.to(sid).emit("screen-share-stopped", socket.id);
+            }
+        }
+        broadcastServerState(user.voiceServerId);
+    });
+
+    // Yetkiye bağlı AFK odasına taşıma
+    socket.on("member-move-afk", ({ serverId, targetUsername }, cb) => {
+        const db = getDB();
+        const actor = activeUsers.get(socket.id);
+        const srv = serverId && db.servers[serverId];
+        if (!actor || !srv || !srv.members[actor.username]) {
+            return cb?.({ ok: false, error: "Yetkisiz işlem." });
+        }
+
+        const canMove =
+            hasPerm(srv, actor.username, "moveMembers") ||
+            hasPerm(srv, actor.username, "muteMembers") ||
+            hasPerm(srv, actor.username, "administrator");
+        if (!canMove) return cb?.({ ok: false, error: "AFK odasına taşıma yetkin yok." });
+
+        const targetUname = String(targetUsername || "").trim().toLowerCase();
+        if (!canActOnMember(srv, actor.username, targetUname)) {
+            return cb?.({ ok: false, error: "Bu üyeyi taşıma yetkin yok." });
+        }
+
+        const afkCh = srv.afkChannelId
+            ? srv.channels.find((c) => c.id === srv.afkChannelId && c.type === "voice")
+            : null;
+        if (!afkCh) return cb?.({ ok: false, error: "AFK kanalı ayarlanmamış." });
+
+        let targetSid = null;
+        let targetUser = null;
+        for (const [sid, u] of activeUsers.entries()) {
+            if (u.username === targetUname) {
+                targetSid = sid;
+                targetUser = u;
+                break;
+            }
+        }
+        if (!targetSid || !targetUser || targetUser.voiceServerId !== srv.id || !targetUser.voiceChannel) {
+            return cb?.({ ok: false, error: "Kullanıcı ses kanalında değil." });
+        }
+        if (targetUser.voiceChannel === afkCh.id) {
+            return cb?.({ ok: false, error: "Kullanıcı zaten AFK odasında." });
+        }
+
+        const actorRec = db.users[actor.username];
+        const actorName = srv.members[actor.username]?.nickname || actorRec?.displayName || actor.username;
+        moveMemberToVoiceChannel(io, srv, targetSid, targetUser, afkCh, {
+            reason: "manual-afk",
+            movedBy: actorName
+        });
+        cb?.({ ok: true });
+    });
+
+    // Yetkiye bağlı sürükle-bırak ses kanalından kanala taşıma
+    socket.on("member-move-voice", ({ serverId, targetUsername, targetChannelId }, cb) => {
+        const db = getDB();
+        const actor = activeUsers.get(socket.id);
+        const srv = serverId && db.servers[serverId];
+        if (!actor || !srv || !srv.members[actor.username]) {
+            return cb?.({ ok: false, error: "Yetkisiz işlem." });
+        }
+
+        const canMove =
+            hasPerm(srv, actor.username, "moveMembers") ||
+            hasPerm(srv, actor.username, "administrator");
+        if (!canMove) {
+            return cb?.({ ok: false, error: "Üyeleri ses kanalları arasında taşıma yetkin yok." });
+        }
+
+        const targetUname = String(targetUsername || "").trim().toLowerCase();
+        const isSelfMove = actor.username === targetUname;
+        if (!isSelfMove && !canActOnMember(srv, actor.username, targetUname)) {
+            return cb?.({ ok: false, error: "Kendinle eşit veya üst yetkideki bir üyeyi taşıyamazsın." });
+        }
+
+        const destCh = srv.channels.find((c) => c.id === targetChannelId && c.type === "voice");
+        if (!destCh) return cb?.({ ok: false, error: "Hedef ses kanalı bulunamadı." });
+
+        let targetSid = null;
+        let targetUser = null;
+        for (const [sid, u] of activeUsers.entries()) {
+            if (u.username === targetUname) {
+                targetSid = sid;
+                targetUser = u;
+                break;
+            }
+        }
+        if (!targetSid || !targetUser || targetUser.voiceServerId !== srv.id || !targetUser.voiceChannel) {
+            return cb?.({ ok: false, error: "Kullanıcı bu sunucuda bir ses kanalında değil." });
+        }
+        if (targetUser.voiceChannel === destCh.id) {
+            return cb?.({ ok: false, error: "Kullanıcı zaten bu ses kanalında." });
+        }
+
+        const isAfkDest = Boolean(destCh.isAfk || srv.afkChannelId === destCh.id);
+        const actorRec = db.users[actor.username];
+        const actorName = srv.members[actor.username]?.nickname || actorRec?.displayName || actor.username;
+
+        moveMemberToVoiceChannel(io, srv, targetSid, targetUser, destCh, {
+            reason: isAfkDest ? "manual-afk" : "moved",
+            movedBy: actorName
+        });
+        cb?.({ ok: true });
+    });
+
+    // WebRTC Sinyalleme (yalnızca aynı ses kanalındaki eşler arası)
     socket.on("webrtc-offer", ({ to, offer }) => {
         if (!to || !offer || !inSameVoiceChannel(socket.id, to)) return;
         io.to(to).emit("webrtc-offer", { from: socket.id, offer });
@@ -244,33 +357,10 @@ function registerVoiceHandlers(io, socket) {
         if (!to || !candidate || !inSameVoiceChannel(socket.id, to)) return;
         io.to(to).emit("webrtc-ice", { from: socket.id, candidate });
     });
-
-    socket.on("screen-share-stopped", () => {
-        const user = activeUsers.get(socket.id);
-        if (!user) return;
-        user.screenSharing = false;
-        user.screenStreamId = null;
-        if (user.voiceServerId) {
-            socket.to("srv:" + user.voiceServerId).emit("screen-share-stopped", socket.id);
-            broadcastServerState(user.voiceServerId);
-        }
-    });
-
-    socket.on("cam-stopped", () => {
-        const user = activeUsers.get(socket.id);
-        if (!user) return;
-        user.camOn = false;
-        user.camStreamId = null;
-        if (user.voiceServerId) {
-            socket.to("srv:" + user.voiceServerId).emit("cam-stopped", socket.id);
-            broadcastServerState(user.voiceServerId);
-        }
-    });
 }
 
 module.exports = {
     registerVoiceHandlers,
-    moveSocketToVoiceChannel,
     startAfkWatcher,
     cleanupVoiceOnDisconnect
 };

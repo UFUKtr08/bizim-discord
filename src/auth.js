@@ -25,8 +25,13 @@ const {
     broadcastUserPresenceAcrossServers
 } = require("./db");
 
-function completeUserSession(io, socket, username, record, tokenToReturn) {
+function sanitizePresence(raw) {
+    return raw === "dnd" || raw === "offline" ? raw : "online";
+}
+
+function completeUserSession(io, socket, username, record, tokenToReturn, initialPresence = "online") {
     const db = getDB();
+    const startPresence = sanitizePresence(initialPresence);
 
     for (const [oldId, u] of activeUsers.entries()) {
         if (u.username === username && oldId !== socket.id) {
@@ -48,6 +53,7 @@ function completeUserSession(io, socket, username, record, tokenToReturn) {
             const defaultRole = defSrv.roles[defSrv.roles.length - 1]?.id || "role-member";
             defSrv.members[username] = {
                 roleIds: record.isGlobalAdmin ? [defSrv.roles[0]?.id || defaultRole] : [defaultRole],
+                nickname: "",
                 joinedAt: Date.now()
             };
             saveAndSyncDB();
@@ -64,6 +70,7 @@ function completeUserSession(io, socket, username, record, tokenToReturn) {
         color: record.color || "#5865f2",
         avatar: record.avatar || "",
         status: record.status || "Çevrimiçi",
+        presence: startPresence,
         activeServerId: initialServerId,
         voiceServerId: null,
         voiceChannel: null,
@@ -82,7 +89,6 @@ function completeUserSession(io, socket, username, record, tokenToReturn) {
         socket.join("srv:" + s.id);
     }
 
-    // Boş/sıfırlanmış (seededOnly) DB asla yerel yedeğin üzerine senkronize edilmez
     if (record.isGlobalAdmin && !db.meta?.seededOnly) {
         socket.emit("db-sync", db);
     }
@@ -102,6 +108,7 @@ function completeUserSession(io, socket, username, record, tokenToReturn) {
             color: record.color || "#5865f2",
             avatar: record.avatar || "",
             status: record.status || "Çevrimiçi",
+            presence: startPresence,
             hasRecoveryCode: Boolean(record.recoveryHash && record.recoverySalt)
         },
         servers: userServers,
@@ -194,7 +201,6 @@ function registerAuthHandlers(io, socket) {
             isFirstSetup: false
         });
 
-        // Bağlı tüm kullanıcıların sunucu odalarını, sunucu listelerini ve aktif snapshot'larını anında yenile
         for (const [sid, au] of activeUsers.entries()) {
             const targetSock = io.sockets.sockets.get(sid);
             if (!targetSock) continue;
@@ -285,6 +291,7 @@ function registerAuthHandlers(io, socket) {
                 : (targetServer.roles[targetServer.roles.length - 1]?.id || "role-member");
             targetServer.members[clean] = {
                 roleIds: [assignRoleId],
+                nickname: "",
                 joinedAt: Date.now()
             };
         }
@@ -295,7 +302,7 @@ function registerAuthHandlers(io, socket) {
         cb?.({ ok: true, role: db.users[clean].role, recoveryCode });
     });
 
-    socket.on("login", ({ username, password, remember }, cb) => {
+    socket.on("login", ({ username, password, remember, initialPresence }, cb) => {
         if (!checkRateLimit("login:" + getClientIp(socket), 8, 60000)) {
             return cb?.({ ok: false, error: "Çok fazla giriş denemesi. 1 dakika bekleyin." });
         }
@@ -321,11 +328,13 @@ function registerAuthHandlers(io, socket) {
             saveAndSyncDB({ immediateDisk: true });
         }
 
-        cb?.(completeUserSession(io, socket, clean, record, token));
+        cb?.(completeUserSession(io, socket, clean, record, token, initialPresence || "online"));
     });
 
-    socket.on("login-token", (token, cb) => {
+    socket.on("login-token", (payload, cb) => {
         const db = getDB();
+        const token = typeof payload === "string" ? payload : payload?.token;
+        const initialPresence = typeof payload === "object" ? payload?.initialPresence : "online";
         const entry = token && db.sessions[token];
         const norm = normalizeSessionEntry(entry, db.users);
         if (!norm) {
@@ -336,15 +345,27 @@ function registerAuthHandlers(io, socket) {
             return cb?.({ ok: false });
         }
         const record = db.users[norm.username];
-        cb?.(completeUserSession(io, socket, norm.username, record, token));
+        cb?.(completeUserSession(io, socket, norm.username, record, token, initialPresence || "online"));
     });
 
     socket.on("logout", (token) => {
         const db = getDB();
         if (token && db.sessions[token]) {
             delete db.sessions[token];
-            saveAndSyncDB();
+            saveAndSyncDB({ immediateDisk: true });
         }
+    });
+
+    // Kullanıcı kendi durum ışığını değiştirebilir (online | dnd | offline)
+    socket.on("set-presence", ({ presence }, cb) => {
+        const user = activeUsers.get(socket.id);
+        if (!user) return cb?.({ ok: false, error: "Oturum bulunamadı." });
+        if (!["online", "dnd", "offline"].includes(presence)) {
+            return cb?.({ ok: false, error: "Geçersiz durum." });
+        }
+        user.presence = presence;
+        broadcastUserPresenceAcrossServers(user.username);
+        cb?.({ ok: true, presence });
     });
 
     socket.on("reset-password-recovery", ({ username, recoveryCode, newPassword }, cb) => {

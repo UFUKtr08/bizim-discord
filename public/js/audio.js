@@ -1,765 +1,1252 @@
-import { socket, isElectron, state, $, showToast } from "./state.js";
+import { socket, isElectron, state, hooks, $, escapeHTML, showToast, openModal, closeModal } from "./state.js";
+import {
+    ensureSharedAudioCtx,
+    playTone,
+    optimizeOpusSDP,
+    buildMicPipeline,
+    stopMicPipeline,
+    applyMuteState,
+    attachRemoteAudio,
+    cleanupRemoteAudioNode,
+    setSpeakingState,
+    pushOverlayState
+} from "./audio.js";
 
 // =========================================================================
-// PAYLAŞIMLI AUDIOCONTEXT, ÇIKIŞ AYGITI & ELECTRON 33 HİBRİT SES MOTORU
+// CANLI VIDEO SAHNESİ (DISCORD TARZI ORANTILI BEST-FIT IZGARA & SPOTLIGHT)
 // =========================================================================
-export function ensureSharedAudioCtx() {
-    if (!state.sharedAudioCtx) {
-        const Ctx = window.AudioContext || window.webkitAudioContext;
-        state.sharedAudioCtx = new Ctx({ latencyHint: "interactive" });
-        state.masterOutGain = state.sharedAudioCtx.createGain();
-        state.masterOutGain.gain.value = state.deafened ? 0 : 1;
-        state.masterOutGain.connect(state.sharedAudioCtx.destination);
-        applyOutputDevice();
-    }
-    if (state.sharedAudioCtx.state === "suspended") {
-        state.sharedAudioCtx.resume().catch(() => { });
-    }
-    return state.sharedAudioCtx;
+let stageResizeObserver = null;
+let stageLayoutRaf = null;
+
+function ensureStageObserver() {
+    if (stageResizeObserver) return;
+    const tilesWrap = $("stage-tiles");
+    if (!tilesWrap || typeof ResizeObserver === "undefined") return;
+    stageResizeObserver = new ResizeObserver(() => {
+        scheduleStageLayout();
+    });
+    stageResizeObserver.observe(tilesWrap);
 }
 
-export function resumeAudioOnGesture() {
-    if (state.sharedAudioCtx && state.sharedAudioCtx.state === "suspended") {
-        state.sharedAudioCtx.resume().catch(() => { });
-    }
-    for (const peer of state.peers.values()) {
-        for (const node of peer.audioNodes) {
-            if (node.active && node.audioEl && node.audioEl.paused) {
-                node.audioEl.play().catch(() => { });
-            }
-        }
-    }
-}
-
-export function applyOutputDevice() {
-    const sinkId = $("spk-select")?.value;
-    if (!sinkId) return;
-
-    if (state.sharedAudioCtx && typeof state.sharedAudioCtx.setSinkId === "function") {
-        state.sharedAudioCtx.setSinkId(sinkId).catch(() => { });
-    }
-
-    for (const peer of state.peers.values()) {
-        for (const node of peer.audioNodes) {
-            if (node.active && node.audioEl && typeof node.audioEl.setSinkId === "function") {
-                node.audioEl.setSinkId(sinkId).catch(() => { });
-            }
-        }
-    }
-}
-
-function getPeerDesiredVolume(peerId) {
-    const m = state.voiceMembersCache.get(peerId) || state.members.find((x) => x.id === peerId);
-    const volKey = m?.username || peerId;
-    return state.userVolumes.has(volKey) ? state.userVolumes.get(volKey) : 1;
-}
-
-// Electron 33 / Chromium Hibrit Oynatma:
-// 0% - 100%  -> Doğrudan native <audio> (sıfır Web Audio sessizlik riski)
-// 101% - 200% -> Native <audio> muted=true ama aktif oynar halde + Web Audio GainNode boost
-function applyNodePlaybackVolume(nodeObj, rawVol) {
-    if (!nodeObj || !nodeObj.active) return;
-    const clamped = Math.max(0, Math.min(2, Number.isFinite(rawVol) ? rawVol : 1));
-    nodeObj.volume = clamped;
-
-    const isDeaf = state.deafened;
-    const useBoost = !isDeaf && clamped > 1.001 && Boolean(nodeObj.boostGain);
-
-    if (nodeObj.audioEl) {
-        if (isDeaf || clamped <= 0.001) {
-            nodeObj.audioEl.muted = true;
-            nodeObj.audioEl.volume = 0;
-        } else if (useBoost) {
-            // Chromium'da remote MediaStream'i Web Audio'ya beslemek için <audio> muted ama playing kalır
-            nodeObj.audioEl.muted = true;
-            nodeObj.audioEl.volume = 0;
-        } else {
-            nodeObj.audioEl.muted = false;
-            nodeObj.audioEl.volume = Math.min(1, clamped);
-        }
-        if (nodeObj.audioEl.paused) {
-            nodeObj.audioEl.play().catch(() => { });
-        }
-    }
-
-    if (nodeObj.boostGain && state.sharedAudioCtx) {
-        const targetGain = useBoost ? clamped : 0;
-        try {
-            nodeObj.boostGain.gain.setTargetAtTime(targetGain, state.sharedAudioCtx.currentTime, 0.015);
-        } catch {
-            nodeObj.boostGain.gain.value = targetGain;
-        }
-    }
-}
-
-export function setPeerAudioVolume(peerId, vol) {
-    const peer = state.peers.get(peerId);
-    if (!peer) return;
-    for (const node of peer.audioNodes) {
-        if (node.active) applyNodePlaybackVolume(node, vol);
-    }
-}
-
-export function applyAllRemoteAudioRouting() {
-    if (state.masterOutGain) {
-        state.masterOutGain.gain.value = state.deafened ? 0 : 1;
-    }
-    for (const [peerId, peer] of state.peers.entries()) {
-        const vol = getPeerDesiredVolume(peerId);
-        for (const node of peer.audioNodes) {
-            if (node.active) applyNodePlaybackVolume(node, vol);
-        }
-    }
-}
-
-export function attachRemoteAudio(peerId, peer, track, _stream, { isMic = true } = {}) {
-    // Aynı track ikinci kez eklenmesin
-    const existing = peer.audioNodes.find((n) => n.active && n.trackId === track.id);
-    if (existing) {
-        existing.isMic = isMic;
-        applyNodePlaybackVolume(existing, getPeerDesiredVolume(peerId));
-        return existing;
-    }
-
-    const trackStream = new MediaStream([track]);
-    const audioEl = document.createElement("audio");
-    audioEl.autoplay = true;
-    audioEl.playsInline = true;
-    audioEl.srcObject = trackStream;
-
-    const sinkPool = $("hidden-audio-sink") || document.body;
-    sinkPool.appendChild(audioEl);
-
-    const sinkId = $("spk-select")?.value;
-    if (sinkId && typeof audioEl.setSinkId === "function") {
-        audioEl.setSinkId(sinkId).catch(() => { });
-    }
-
-    let src = null;
-    let boostGain = null;
-    let analyser = null;
-
-    try {
-        const ctx = ensureSharedAudioCtx();
-        src = ctx.createMediaStreamSource(trackStream);
-        boostGain = ctx.createGain();
-        boostGain.gain.value = 0;
-
-        analyser = ctx.createAnalyser();
-        analyser.fftSize = 128;
-
-        // Konuşma tespiti kazançtan bağımsız pasif analyser üzerinden yapılır
-        src.connect(analyser);
-        src.connect(boostGain);
-        boostGain.connect(state.masterOutGain);
-    } catch { }
-
-    const nodeObj = {
-        trackId: track.id,
-        isMic,
-        src,
-        boostGain,
-        analyser,
-        audioEl,
-        volume: 1,
-        active: true
-    };
-
-    peer.audioNodes.push(nodeObj);
-    applyNodePlaybackVolume(nodeObj, getPeerDesiredVolume(peerId));
-    audioEl.play().catch(() => { });
-
-    track.addEventListener("ended", () => cleanupRemoteAudioNode(peer, nodeObj), { once: true });
-    return nodeObj;
-}
-
-export function cleanupRemoteAudioNode(peer, nodeObj) {
-    if (!nodeObj || !nodeObj.active) return;
-    nodeObj.active = false;
-    try {
-        nodeObj.src?.disconnect();
-        nodeObj.boostGain?.disconnect();
-        nodeObj.analyser?.disconnect();
-    } catch { }
-    if (nodeObj.audioEl) {
-        try {
-            nodeObj.audioEl.pause();
-            nodeObj.audioEl.srcObject = null;
-            nodeObj.audioEl.remove();
-        } catch { }
-    }
-    peer.audioNodes = peer.audioNodes.filter((n) => n !== nodeObj);
-}
-
-// =========================================================================
-// BİLDİRİM TONLARI, SOUNDBOARD & OPUS SDP OPTİMİZASYONU
-// =========================================================================
-export function playTone(freq = 640, duration = 0.08, type = "sine", vol = 0.06) {
-    if (state.deafened) return;
-    try {
-        const ctx = ensureSharedAudioCtx();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = type;
-        osc.frequency.setValueAtTime(freq, ctx.currentTime);
-        gain.gain.setValueAtTime(vol, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.0008, ctx.currentTime + duration);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + duration);
-    } catch { }
-}
-
-export function playSoundboardSynth(soundId) {
-    if (state.deafened || state.soundboardVolume <= 0) return;
-    const vol = (state.soundboardVolume / 100) * 0.28;
-    try {
-        const ctx = ensureSharedAudioCtx();
-        const now = ctx.currentTime;
-        const out = ctx.createGain();
-        out.gain.value = vol;
-        out.connect(ctx.destination);
-
-        const note = (freq, start, dur, type = "sine", gainVal = 1, slideTo = null) => {
-            const o = ctx.createOscillator();
-            const g = ctx.createGain();
-            o.type = type;
-            o.frequency.setValueAtTime(freq, now + start);
-            if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, now + start + dur);
-            g.gain.setValueAtTime(0.0001, now + start);
-            g.gain.linearRampToValueAtTime(gainVal, now + start + 0.015);
-            g.gain.exponentialRampToValueAtTime(0.0008, now + start + dur);
-            o.connect(g);
-            g.connect(out);
-            o.start(now + start);
-            o.stop(now + start + dur + 0.02);
-        };
-
-        const noiseBurst = (start, dur, filterFreq = 1800, gainVal = 0.5) => {
-            const bufferSize = Math.floor(ctx.sampleRate * dur);
-            const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-            const data = buffer.getChannelData(0);
-            for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
-            const src = ctx.createBufferSource();
-            src.buffer = buffer;
-            const filter = ctx.createBiquadFilter();
-            filter.type = "bandpass";
-            filter.frequency.value = filterFreq;
-            const g = ctx.createGain();
-            g.gain.setValueAtTime(gainVal, now + start);
-            g.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
-            src.connect(filter);
-            filter.connect(g);
-            g.connect(out);
-            src.start(now + start);
-        };
-
-        switch (soundId) {
-            case "airhorn":
-                [440, 554.37, 659.25].forEach((f) => {
-                    note(f, 0, 0.14, "sawtooth", 0.35);
-                    note(f, 0.16, 0.14, "sawtooth", 0.35);
-                    note(f, 0.33, 0.55, "sawtooth", 0.4);
-                });
-                break;
-            case "victory":
-                note(523.25, 0, 0.14, "triangle", 0.7);
-                note(659.25, 0.13, 0.14, "triangle", 0.7);
-                note(783.99, 0.26, 0.14, "triangle", 0.75);
-                note(1046.5, 0.4, 0.55, "triangle", 0.85);
-                break;
-            case "fail":
-                note(311.13, 0, 0.26, "sawtooth", 0.45, 293.66);
-                note(277.18, 0.28, 0.26, "sawtooth", 0.45, 261.63);
-                note(246.94, 0.56, 0.58, "sawtooth", 0.5, 195);
-                break;
-            case "headshot":
-                note(1480, 0, 0.08, "sine", 0.9);
-                note(2217, 0.04, 0.24, "sine", 0.75);
-                break;
-            case "countdown":
-                note(520, 0, 0.12, "square", 0.4);
-                note(520, 0.35, 0.12, "square", 0.4);
-                note(520, 0.7, 0.12, "square", 0.4);
-                note(1040, 1.05, 0.32, "square", 0.55);
-                break;
-            case "gg":
-                note(659.25, 0, 0.2, "sine", 0.7);
-                note(987.77, 0.15, 0.35, "sine", 0.75);
-                break;
-            case "alert":
-                note(880, 0, 0.18, "sawtooth", 0.45, 580);
-                note(880, 0.22, 0.18, "sawtooth", 0.45, 580);
-                note(880, 0.44, 0.22, "sawtooth", 0.45, 580);
-                break;
-            case "laser":
-                note(1400, 0, 0.24, "sawtooth", 0.55, 140);
-                break;
-            case "drum":
-                note(140, 0, 0.12, "sine", 0.9, 55);
-                note(180, 0.18, 0.12, "sine", 0.85, 65);
-                noiseBurst(0.36, 0.38, 4200, 0.55);
-                break;
-            case "ping":
-            default:
-                note(1046.5, 0, 0.12, "sine", 0.75);
-                note(1318.5, 0.1, 0.22, "sine", 0.65);
-                break;
-        }
-    } catch { }
-}
-
-export function optimizeOpusSDP(sdp) {
-    if (!sdp) return sdp;
-    return sdp.replace(/a=fmtp:(\d+) (.+)/g, (match, pt, params) => {
-        if (!sdp.includes(`a=rtpmap:${pt} opus/48000`)) return match;
-        let p = params;
-        if (!p.includes("usedtx=")) p += ";usedtx=1";
-        if (!p.includes("useinbandfec=")) p += ";useinbandfec=1";
-        if (!p.includes("maxaveragebitrate=")) p += ";maxaveragebitrate=32000";
-        if (!p.includes("minptime=")) p += ";minptime=10";
-        return `a=fmtp:${pt} ${p}`;
+function scheduleStageLayout() {
+    if (stageLayoutRaf) return;
+    stageLayoutRaf = requestAnimationFrame(() => {
+        stageLayoutRaf = null;
+        layoutStageTiles();
     });
 }
 
-// =========================================================================
-// TERCİHLER, TEMA, OYUN MODU & ELECTRON OVERLAY
-// =========================================================================
-export function clearAllSpeakingVisuals() {
-    document.querySelectorAll(".speaking").forEach((el) => el.classList.remove("speaking"));
+function clampAspectRatio(rawRatio) {
+    if (!Number.isFinite(rawRatio) || rawRatio <= 0) return 16 / 9;
+    return Math.max(0.48, Math.min(2.45, rawRatio));
 }
 
-export function updateGameModeUI() {
-    document.body.classList.toggle("game-mode", state.gameMode);
-    const btn = $("btn-game-mode");
-    const lbl = $("game-mode-lbl");
-    if (btn) btn.classList.toggle("active", state.gameMode);
-    if (lbl) lbl.textContent = state.gameMode ? "Oyun Modu: AÇIK" : "Oyun Modu";
-    if (state.gameMode) clearAllSpeakingVisuals();
-}
-
-export function updateGateMarkerUI() {
-    const valEl = $("gate-val");
-    const sbLine = $("sidebar-gate-line");
-    const mdLine = $("modal-gate-line");
-    if (valEl) valEl.textContent = state.gateThreshold > 0 ? `${state.gateThreshold}%` : "Kapalı";
-    if (sbLine) sbLine.style.left = `${state.gateThreshold}%`;
-    if (mdLine) mdLine.style.left = `${state.gateThreshold}%`;
-}
-
-export function applyPreferences() {
-    const theme = localStorage.getItem("bd_theme") || "dark";
-    const accent = localStorage.getItem("bd_accent") || "#5865f2";
-    const fontSize = localStorage.getItem("bd_fontsize") || "14px";
-
-    document.body.setAttribute("data-theme", theme);
-    document.documentElement.style.setProperty("--accent", accent);
-    document.documentElement.style.setProperty("--font-size", fontSize);
-
-    if ($("theme-select")) $("theme-select").value = theme;
-    if ($("accent-picker")) $("accent-picker").value = accent;
-    if ($("font-size-select")) $("font-size-select").value = fontSize;
-    if ($("gate-slider")) $("gate-slider").value = String(state.gateThreshold);
-    if ($("chk-ptt")) $("chk-ptt").checked = state.pttEnabled;
-    if ($("btn-ptt-key")) $("btn-ptt-key").textContent = state.pttKey;
-    if ($("chk-mirror")) $("chk-mirror").checked = state.mirrorCam;
-    if ($("chk-afk-exempt")) $("chk-afk-exempt").checked = state.afkExempt;
-    if ($("sb-vol-slider")) $("sb-vol-slider").value = String(state.soundboardVolume);
-    if ($("sb-vol-val")) $("sb-vol-val").textContent = `${state.soundboardVolume}%`;
-
-    updateGateMarkerUI();
-    updateGameModeUI();
-}
-
-export function syncOverlaySettingsUI(cfg) {
-    if (!cfg) return;
-    state.overlayConfigCache = cfg;
-    if ($("chk-overlay-enabled")) $("chk-overlay-enabled").checked = Boolean(cfg.enabled);
-    if ($("overlay-pos-select")) $("overlay-pos-select").value = cfg.position || "top-left";
-    if ($("overlay-size-select")) $("overlay-size-select").value = cfg.size || "md";
-    if ($("chk-disable-gpu")) $("chk-disable-gpu").checked = Boolean(cfg.disableGpu);
-    if ($("overlay-restart-banner")) $("overlay-restart-banner").style.display = cfg.needsRestart ? "flex" : "none";
-}
-
-export function pushOverlayState(force = false) {
-    if (!isElectron) return;
-    if (!state.voiceChannelId || !state.voiceServerId) {
-        if (force || state.lastOverlayHash !== "OFF") {
-            state.lastOverlayHash = "OFF";
-            window.electronAPI.updateOverlayState({ active: false, channelName: "", users: [] });
+function syncTileAspectFromVideo(tile, vid) {
+    if (!tile || !vid) return;
+    if (vid.videoWidth > 0 && vid.videoHeight > 0) {
+        const ratio = clampAspectRatio(vid.videoWidth / vid.videoHeight);
+        const prev = parseFloat(tile.dataset.ratio || "0");
+        if (Math.abs(prev - ratio) > 0.01) {
+            tile.dataset.ratio = String(ratio);
+            scheduleStageLayout();
         }
+    }
+}
+
+export function layoutStageTiles() {
+    const stage = $("media-stage");
+    const tilesWrap = $("stage-tiles");
+    if (!stage || !tilesWrap || !stage.classList.contains("active")) return;
+
+    const visibleTiles = Array.from(tilesWrap.querySelectorAll(".video-tile:not(.hidden-in-spot)"));
+    if (!visibleTiles.length) return;
+
+    const W = tilesWrap.clientWidth;
+    const H = tilesWrap.clientHeight;
+    if (W < 40 || H < 40) {
+        scheduleStageLayout();
         return;
     }
 
-    const list = [];
-    for (const m of state.voiceMembersCache.values()) {
-        const isMe = state.me && m.username === state.me.username;
-        const muted = isMe
-            ? (state.selfMuted || state.serverMuted || state.deafened)
-            : Boolean(m.selfMuted || m.serverMuted || m.deafened);
-        const speaking = isMe
-            ? Boolean(state.speakingMap.get(socket.id)) && !muted
-            : Boolean(m.id && state.speakingMap.get(m.id)) && !muted;
+    const N = visibleTiles.length;
+    const gap = N === 1 ? 0 : 10;
+    const ratios = visibleTiles.map((t) => clampAspectRatio(parseFloat(t.dataset.ratio || String(16 / 9))));
 
-        list.push({
-            username: m.username,
-            displayName: m.displayName || m.username,
-            color: m.color || "#5865f2",
-            avatar: m.avatar || "",
-            muted,
-            serverMuted: Boolean(isMe ? state.serverMuted : m.serverMuted),
-            deafened: Boolean(isMe ? state.deafened : m.deafened),
-            speaking
+    let bestCols = 1;
+    let bestArea = -1;
+    let bestSizes = [];
+
+    for (let cols = 1; cols <= N; cols++) {
+        const rows = Math.ceil(N / cols);
+        const cellW = Math.floor((W - gap * (cols - 1)) / cols);
+        const cellH = Math.floor((H - gap * (rows - 1)) / rows);
+        if (cellW < 60 || cellH < 45) continue;
+
+        let totalArea = 0;
+        const sizes = [];
+
+        for (let i = 0; i < N; i++) {
+            const r = ratios[i];
+            let w;
+            let h;
+            if (cellW / cellH > r) {
+                h = cellH;
+                w = Math.floor(h * r);
+            } else {
+                w = cellW;
+                h = Math.floor(w / r);
+            }
+            w = Math.max(60, Math.min(cellW, w));
+            h = Math.max(45, Math.min(cellH, h));
+            totalArea += w * h;
+            sizes.push({ w, h });
+        }
+
+        if (totalArea > bestArea) {
+            bestArea = totalArea;
+            bestCols = cols;
+            bestSizes = sizes;
+        }
+    }
+
+    if (!bestSizes.length) {
+        const fallbackW = Math.max(120, Math.floor(W));
+        const fallbackH = Math.max(90, Math.floor(H));
+        bestCols = 1;
+        bestSizes = ratios.map((r) => {
+            if (fallbackW / fallbackH > r) return { w: Math.floor(fallbackH * r), h: fallbackH };
+            return { w: fallbackW, h: Math.floor(fallbackW / r) };
         });
     }
 
-    list.sort((a, b) => a.displayName.localeCompare(b.displayName, "tr"));
+    tilesWrap.style.gridTemplateColumns = `repeat(${bestCols}, auto)`;
+    tilesWrap.style.gap = `${gap}px`;
 
-    const hash = list
-        .map((u) => `${u.username}:${u.speaking ? 1 : 0}:${u.muted ? 1 : 0}:${u.displayName}:${u.color}:${u.avatar ? u.avatar.length : 0}`)
-        .join("|");
-    if (!force && hash === state.lastOverlayHash) return;
-    state.lastOverlayHash = hash;
-
-    window.electronAPI.updateOverlayState({
-        active: true,
-        channelName: state.voiceChannelId,
-        users: list
+    visibleTiles.forEach((tile, idx) => {
+        const sz = bestSizes[idx];
+        if (!sz) return;
+        tile.style.width = `${sz.w}px`;
+        tile.style.height = `${sz.h}px`;
     });
 }
 
-export async function updateOverlaySettings(partial) {
-    if (!isElectron) return;
-    try {
-        const res = await window.electronAPI.setOverlayConfig(partial);
-        syncOverlaySettingsUI(res);
-        if (res.needsRestart) {
-            showToast("Saydam overlay için uygulamayı yeniden başlatın.", "info", 4500);
-        } else {
-            state.lastOverlayHash = "";
-            pushOverlayState(true);
-        }
-    } catch { }
-}
+export function updateStageLayout() {
+    const stage = $("media-stage");
+    const tilesWrap = $("stage-tiles");
+    if (!stage || !tilesWrap) return;
 
-export async function toggleOverlayFromShortcut() {
-    if (!isElectron) return;
-    const nextEnabled = !state.overlayConfigCache.enabled;
-    await updateOverlaySettings({ enabled: nextEnabled });
-    if (!state.overlayConfigCache.needsRestart) {
-        showToast(nextEnabled ? "Oyun İçi Overlay açıldı." : "Oyun İçi Overlay kapatıldı.", "info", 2000);
+    const tiles = Array.from(tilesWrap.querySelectorAll(".video-tile"));
+
+    if (!tiles.length) {
+        stage.classList.remove("active", "expanded");
+        state.spotlightTileId = null;
+        if ($("btn-exit-spotlight")) $("btn-exit-spotlight").style.display = "none";
+        if ($("btn-expand-stage")) $("btn-expand-stage").textContent = "Genişlet";
+        return;
     }
+
+    stage.classList.add("active");
+    ensureStageObserver();
+
+    if ($("stage-count-lbl")) {
+        $("stage-count-lbl").textContent = `Canlı Sahne (${tiles.length} yayın)`;
+    }
+
+    const spotExists = state.spotlightTileId && document.getElementById("tile-" + state.spotlightTileId);
+    if (!spotExists) state.spotlightTileId = null;
+
+    tilesWrap.classList.toggle("spotlight", Boolean(state.spotlightTileId));
+    if ($("btn-exit-spotlight")) {
+        $("btn-exit-spotlight").style.display = state.spotlightTileId ? "" : "none";
+    }
+
+    tiles.forEach((t) => {
+        const tid = t.id.replace(/^tile-/, "");
+        t.classList.toggle("hidden-in-spot", Boolean(state.spotlightTileId && tid !== state.spotlightTileId));
+    });
+
+    scheduleStageLayout();
 }
 
-export async function initElectronSettingsUI() {
-    if (!isElectron) return;
-    if ($("electron-overlay-card")) $("electron-overlay-card").style.display = "flex";
+export function toggleSpotlight(tileKey) {
+    state.spotlightTileId = state.spotlightTileId === tileKey ? null : tileKey;
+    updateStageLayout();
+}
 
-    try {
-        const dbPath = await window.electronAPI.dbPath();
-        if ($("db-info")) $("db-info").textContent = `Yerel Master DB: ${dbPath}`;
-    } catch { }
+export function showMediaTile(tileKey, label, stream, { kind = "cam", isLocal = false } = {}) {
+    const id = "tile-" + tileKey;
+    let tile = document.getElementById(id);
+    if (!tile) {
+        tile = document.createElement("div");
+        tile.id = id;
+        tile.className = "video-tile";
+        tile.dataset.tileKind = kind;
+        tile.dataset.ratio = String(16 / 9);
+        tile.onclick = () => toggleSpotlight(tileKey);
 
-    try {
-        const cfg = await window.electronAPI.getOverlayConfig();
-        syncOverlaySettingsUI(cfg);
-    } catch { }
+        const video = document.createElement("video");
+        video.autoplay = true;
+        video.playsInline = true;
+        video.muted = true;
+        if (kind === "cam") video.classList.add("cover");
+        if (isLocal && kind === "cam" && state.mirrorCam) video.classList.add("mirrored");
 
-    window.electronAPI.onGlobalShortcut((action) => {
-        if (!state.voiceChannelId && action !== "toggle-overlay") return;
-        if (action === "toggle-mute") toggleMute();
-        else if (action === "toggle-deafen") toggleDeafen();
-        else if (action === "toggle-overlay") toggleOverlayFromShortcut();
-    });
+        video.addEventListener("loadedmetadata", () => syncTileAspectFromVideo(tile, video));
+        video.addEventListener("resize", () => syncTileAspectFromVideo(tile, video));
+
+        const fsBtn = document.createElement("button");
+        fsBtn.type = "button";
+        fsBtn.className = "tile-fs-btn";
+        fsBtn.title = "Tam Ekran";
+        fsBtn.textContent = "⛶";
+        fsBtn.onclick = (e) => {
+            e.stopPropagation();
+            if (document.fullscreenElement === tile) {
+                document.exitFullscreen?.().catch(() => { });
+            } else {
+                tile.requestFullscreen?.().catch(() => { });
+            }
+        };
+
+        const lbl = document.createElement("div");
+        lbl.className = "tile-label";
+        lbl.textContent = label;
+
+        tile.appendChild(video);
+        tile.appendChild(fsBtn);
+        tile.appendChild(lbl);
+        $("stage-tiles")?.appendChild(tile);
+    }
+
+    const vid = tile.querySelector("video");
+    if (vid) {
+        if (vid.srcObject !== stream) vid.srcObject = stream;
+        vid.classList.toggle("cover", kind === "cam");
+        if (isLocal && kind === "cam") vid.classList.toggle("mirrored", state.mirrorCam);
+        vid.play().catch(() => { });
+
+        const vTrack = stream?.getVideoTracks?.()[0];
+        const ts = vTrack?.getSettings?.();
+        if (ts?.width > 0 && ts?.height > 0) {
+            tile.dataset.ratio = String(clampAspectRatio(ts.width / ts.height));
+        }
+        syncTileAspectFromVideo(tile, vid);
+    }
+    const lblEl = tile.querySelector(".tile-label");
+    if (lblEl) lblEl.textContent = label;
+
+    updateStageLayout();
+}
+
+export function removeMediaTile(tileKey) {
+    const tile = document.getElementById("tile-" + tileKey);
+    if (tile) {
+        if (document.fullscreenElement === tile) {
+            document.exitFullscreen?.().catch(() => { });
+        }
+        const vid = tile.querySelector("video");
+        if (vid) {
+            try {
+                vid.pause();
+                vid.srcObject = null;
+            } catch { }
+        }
+        tile.remove();
+    }
+    if (state.spotlightTileId === tileKey) state.spotlightTileId = null;
+    updateStageLayout();
+}
+
+export function reconcileRemoteMediaWithMembers(memberList) {
+    if (!state.voiceChannelId) return;
+    const activeIdsInVoice = new Set();
+
+    for (const m of memberList || []) {
+        if (!m.online || !m.id || m.voiceChannel !== state.voiceChannelId) continue;
+        activeIdsInVoice.add(m.id);
+        if (m.id === socket.id) continue;
+
+        if (!m.camOn) removeMediaTile("cam-" + m.id);
+        if (!m.screenSharing) removeMediaTile("screen-" + m.id);
+    }
+
+    const stageTiles = $("stage-tiles");
+    if (!stageTiles) return;
+    for (const tile of Array.from(stageTiles.querySelectorAll(".video-tile"))) {
+        const tid = tile.id.replace(/^tile-/, "");
+        if (tid === "cam-local" || tid === "screen-local") continue;
+        const pid = tid.replace(/^(cam|screen)-/, "");
+        if (pid && !activeIdsInVoice.has(pid) && !state.peers.has(pid)) {
+            removeMediaTile(tid);
+        }
+    }
 }
 
 // =========================================================================
-// MİKROFON DSP ZİNCİRİ & KONUŞMA TESPİTİ
+// DISCORD TARZI AKIM ETİKETLEME (MID / TRACKID / STREAMID HARİTASI)
 // =========================================================================
-export async function loadMediaDevices() {
-    if (!navigator.mediaDevices?.enumerateDevices) return;
-    const devs = await navigator.mediaDevices.enumerateDevices();
-    const micSel = $("mic-select");
-    const spkSel = $("spk-select");
-    const camSel = $("cam-select");
-    if (!micSel || !spkSel || !camSel) return;
-
-    const curMic = micSel.value;
-    const curSpk = spkSel.value;
-    const curCam = camSel.value;
-
-    micSel.innerHTML = '<option value="">Varsayılan Mikrofon</option>';
-    spkSel.innerHTML = '<option value="">Varsayılan Çıkış</option>';
-    camSel.innerHTML = '<option value="">Varsayılan Kamera</option>';
-
-    devs.forEach((d) => {
-        const opt = document.createElement("option");
-        opt.value = d.deviceId;
-        if (d.kind === "audioinput") {
-            opt.textContent = d.label || `Mikrofon ${micSel.length}`;
-            micSel.appendChild(opt);
-        } else if (d.kind === "audiooutput") {
-            opt.textContent = d.label || `Hoparlör ${spkSel.length}`;
-            spkSel.appendChild(opt);
-        } else if (d.kind === "videoinput") {
-            opt.textContent = d.label || `Kamera ${camSel.length}`;
-            camSel.appendChild(opt);
-        }
-    });
-
-    if (curMic) micSel.value = curMic;
-    if (curSpk) spkSel.value = curSpk;
-    if (curCam) camSel.value = curCam;
+function findTransceiverMid(pc, sender) {
+    if (!pc || !sender) return null;
+    try {
+        const t = pc.getTransceivers().find((tr) => tr.sender === sender);
+        return t?.mid ?? null;
+    } catch {
+        return null;
+    }
 }
 
-export function applyLiveDspToggles() {
-    if (state.highPassNode) {
-        state.highPassNode.type = "highpass";
-        state.highPassNode.frequency.value = $("chk-hpf")?.checked ? 85 : 10;
-        state.highPassNode.Q.value = 0.7;
+function buildLocalTrackMeta(peer) {
+    const mids = {};
+    const tracks = {};
+    const streams = {};
+
+    const register = (sender, streamObj, kind) => {
+        if (!sender || !sender.track) return;
+        tracks[sender.track.id] = kind;
+        const mid = findTransceiverMid(peer.pc, sender);
+        if (mid !== null && mid !== undefined) mids[String(mid)] = kind;
+        if (streamObj?.id) streams[streamObj.id] = kind;
+    };
+
+    register(peer.micSender, state.processedMicStream, "mic");
+    register(peer.camSender, state.camStream, "cam");
+    register(peer.screenVideoSender, state.screenStream, "screen");
+    register(peer.screenAudioSender, state.screenStream, "screen-audio");
+
+    return { mids, tracks, streams };
+}
+
+function applyRemoteTrackMeta(peerId, peer, meta) {
+    if (!meta || typeof meta !== "object") return;
+    peer.remoteMeta = {
+        mids: { ...(meta.mids || {}) },
+        tracks: { ...(meta.tracks || {}) },
+        streams: { ...(meta.streams || {}) }
+    };
+
+    const activeKinds = new Set([
+        ...Object.values(peer.remoteMeta.mids),
+        ...Object.values(peer.remoteMeta.tracks)
+    ]);
+    if (!activeKinds.has("cam")) {
+        const m = state.voiceMembersCache.get(peerId);
+        if (!m || !m.camOn) removeMediaTile("cam-" + peerId);
     }
-    if (state.compressorNode) {
-        if ($("chk-comp")?.checked) {
-            state.compressorNode.threshold.value = -18;
-            state.compressorNode.knee.value = 18;
-            state.compressorNode.ratio.value = 6;
-            state.compressorNode.attack.value = 0.004;
-            state.compressorNode.release.value = 0.14;
+    if (!activeKinds.has("screen")) {
+        const m = state.voiceMembersCache.get(peerId);
+        if (!m || !m.screenSharing) removeMediaTile("screen-" + peerId);
+    }
+}
+
+function resolveRemoteTrackKind(peerId, peer, track, stream, transceiver) {
+    const mid = transceiver?.mid;
+    if (mid !== null && mid !== undefined && peer.remoteMeta?.mids?.[String(mid)]) {
+        return peer.remoteMeta.mids[String(mid)];
+    }
+    if (track?.id && peer.remoteMeta?.tracks?.[track.id]) {
+        return peer.remoteMeta.tracks[track.id];
+    }
+    if (stream?.id && peer.remoteMeta?.streams?.[stream.id]) {
+        return peer.remoteMeta.streams[stream.id];
+    }
+
+    const m = state.voiceMembersCache.get(peerId) || state.members.find((x) => x.id === peerId);
+    if (track.kind === "audio") {
+        if (m?.screenStreamId && stream?.id === m.screenStreamId) return "screen-audio";
+        return "mic";
+    }
+
+    if (m?.screenStreamId && stream?.id === m.screenStreamId) return "screen";
+    if (m?.camStreamId && stream?.id === m.camStreamId) return "cam";
+    if (m?.screenSharing && !m?.camOn) return "screen";
+    if (m?.camOn && !m?.screenSharing) return "cam";
+    if (document.getElementById("tile-cam-" + peerId)) return "screen";
+    return "cam";
+}
+
+// =========================================================================
+// VİDEO KALİTE / BITRATE / CONTENT HINT
+// =========================================================================
+export function getCamConstraints() {
+    const q = parseInt($("cam-quality")?.value, 10) || 480;
+    const map = {
+        360: { width: { ideal: 640 }, height: { ideal: 360 }, frameRate: { ideal: 15, max: 20 } },
+        480: { width: { ideal: 854 }, height: { ideal: 480 }, frameRate: { ideal: 24, max: 24 } },
+        720: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } }
+    };
+    const base = map[q] || map[480];
+    const devId = $("cam-select")?.value;
+    return {
+        video: devId ? { ...base, deviceId: { exact: devId } } : { ...base, facingMode: state.facingMode },
+        audio: false
+    };
+}
+
+async function applyVideoSenderTuning(sender, kind, res = 480) {
+    if (!sender) return;
+    try {
+        if (sender.track && "contentHint" in sender.track) {
+            sender.track.contentHint = kind === "screen" ? "detail" : "motion";
+        }
+    } catch { }
+
+    if (typeof sender.getParameters !== "function") return;
+    try {
+        const params = sender.getParameters();
+        if (!params.encodings || !params.encodings.length) params.encodings = [{}];
+        if (kind === "screen") {
+            params.encodings[0].maxBitrate = res >= 1080 ? 2500000 : 1500000;
+            params.degradationPreference = "maintain-resolution";
         } else {
-            state.compressorNode.threshold.value = 0;
-            state.compressorNode.ratio.value = 1;
+            params.encodings[0].maxBitrate = res >= 720 ? 900000 : (res <= 360 ? 350000 : 550000);
+            params.degradationPreference = "balanced";
         }
+        await sender.setParameters(params);
+    } catch { }
+}
+
+// =========================================================================
+// PERFECT NEGOTIATION + GLARE-FREE JOIN + SIRALI SİNYAL KUYRUĞU
+// =========================================================================
+function enqueuePeerOp(peer, fn) {
+    peer.queue = peer.queue
+        .then(() => {
+            if (peer.closed) return;
+            return fn();
+        })
+        .catch(() => { });
+    return peer.queue;
+}
+
+function isSenderActiveOnPc(pc, sender, expectedTrack) {
+    if (!pc || !sender || !expectedTrack) return false;
+    if (sender.track !== expectedTrack) return false;
+    try {
+        const tr = pc.getTransceivers().find((t) => t.sender === sender);
+        if (!tr || tr.stopped) return false;
+        return tr.direction === "sendonly" || tr.direction === "sendrecv";
+    } catch {
+        return false;
     }
 }
 
-export async function buildMicPipeline() {
-    const ctx = ensureSharedAudioCtx();
-    if (state.rawMicStream) state.rawMicStream.getTracks().forEach((t) => t.stop());
-    if (state.micSourceNode) {
-        try { state.micSourceNode.disconnect(); } catch { }
+function attachLocalMicOnly(peer) {
+    if (peer.closed || !state.processedMicStream) return false;
+    const mt = state.processedMicStream.getAudioTracks()[0];
+    if (mt && mt.readyState === "live" && !isSenderActiveOnPc(peer.pc, peer.micSender, mt)) {
+        peer.micSender = peer.pc.addTrack(mt, state.processedMicStream);
+        return true;
     }
-
-    state.rawMicStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-            deviceId: $("mic-select")?.value ? { exact: $("mic-select").value } : undefined,
-            noiseSuppression: Boolean($("chk-ns")?.checked),
-            echoCancellation: Boolean($("chk-aec")?.checked),
-            autoGainControl: Boolean($("chk-agc")?.checked),
-            channelCount: 1
-        }
-    });
-
-    state.micSourceNode = ctx.createMediaStreamSource(state.rawMicStream);
-    if (!state.highPassNode) state.highPassNode = ctx.createBiquadFilter();
-    if (!state.micAnalyserNode) {
-        state.micAnalyserNode = ctx.createAnalyser();
-        state.micAnalyserNode.fftSize = 256;
-    }
-    if (!state.noiseGateNode) {
-        state.noiseGateNode = ctx.createGain();
-        state.noiseGateNode.gain.value = 1;
-    }
-    if (!state.compressorNode) state.compressorNode = ctx.createDynamicsCompressor();
-    if (!state.micGainNode) state.micGainNode = ctx.createGain();
-    if (!state.micDestNode) state.micDestNode = ctx.createMediaStreamDestination();
-
-    state.micGainNode.gain.value = parseFloat($("mic-gain")?.value || "1");
-    applyLiveDspToggles();
-
-    state.micSourceNode.connect(state.highPassNode);
-    state.highPassNode.connect(state.micAnalyserNode);
-    state.highPassNode.connect(state.noiseGateNode);
-    state.noiseGateNode.connect(state.compressorNode);
-    state.compressorNode.connect(state.micGainNode);
-    state.micGainNode.connect(state.micDestNode);
-
-    state.processedMicStream = state.micDestNode.stream;
-    const newTrack = state.processedMicStream.getAudioTracks()[0];
-
-    for (const peer of state.peers.values()) {
-        if (peer.micSender && newTrack) {
-            await peer.micSender.replaceTrack(newTrack).catch(() => { });
-        }
-    }
-
-    applyMuteState();
-    startDspAndVisualLoops();
-    loadMediaDevices().catch(() => { });
-}
-
-export function stopMicPipeline() {
-    if (state.rawMicStream) {
-        state.rawMicStream.getTracks().forEach((t) => t.stop());
-        state.rawMicStream = null;
-    }
-    state.processedMicStream = null;
-    stopDspAndVisualLoops();
-}
-
-export function isEffectivelyMuted() {
-    if (state.serverMuted || state.selfMuted || state.deafened) return true;
-    if (state.pttEnabled && !state.pttPressed) return true;
     return false;
 }
 
-export function applyMuteState() {
-    const muted = isEffectivelyMuted();
-    if (state.processedMicStream) {
-        state.processedMicStream.getAudioTracks().forEach((t) => { t.enabled = !muted; });
-    }
-    applyAllRemoteAudioRouting();
+function ensureLocalTracksAttached(peerId, peer) {
+    if (peer.closed) return false;
+    let changed = attachLocalMicOnly(peer);
 
-    const micBtn = $("btn-mute");
-    const mMicBtn = $("m-btn-mute");
-    const deafBtn = $("btn-deafen");
-    const mDeafBtn = $("m-btn-deafen");
-
-    const micVisualMuted = state.selfMuted || state.serverMuted || state.deafened;
-    [micBtn, mMicBtn].forEach((b) => {
-        if (!b) return;
-        b.classList.toggle("muted", micVisualMuted);
-        b.textContent = state.serverMuted ? "🔇" : (micVisualMuted ? "🎙️✕" : "🎙️");
-    });
-    [deafBtn, mDeafBtn].forEach((b) => {
-        if (!b) return;
-        b.classList.toggle("muted", state.deafened);
-        b.textContent = state.deafened ? "🎧✕" : "🎧";
-    });
-
-    const pttBadge = $("ptt-indicator");
-    if (pttBadge) {
-        pttBadge.style.display = state.voiceChannelId && state.pttEnabled ? "block" : "none";
-        pttBadge.textContent = state.pttPressed
-            ? `Bas-Konuş AKTİF [${state.pttKey}]`
-            : `Bas-Konuş: [${state.pttKey}] Basılı Tut`;
-        pttBadge.classList.toggle("active", state.pttPressed);
+    if (state.camStream) {
+        const ct = state.camStream.getVideoTracks()[0];
+        if (ct && ct.readyState === "live" && !isSenderActiveOnPc(peer.pc, peer.camSender, ct)) {
+            peer.camSender = peer.pc.addTrack(ct, state.camStream);
+            applyVideoSenderTuning(peer.camSender, "cam", parseInt($("cam-quality")?.value, 10) || 480);
+            changed = true;
+        }
     }
 
+    if (state.screenStream) {
+        const svt = state.screenStream.getVideoTracks()[0];
+        const sat = state.screenStream.getAudioTracks()[0];
+        const resVal = parseInt($("screen-res")?.value, 10) || 720;
+
+        if (svt && svt.readyState === "live" && !isSenderActiveOnPc(peer.pc, peer.screenVideoSender, svt)) {
+            peer.screenVideoSender = peer.pc.addTrack(svt, state.screenStream);
+            applyVideoSenderTuning(peer.screenVideoSender, "screen", resVal);
+            changed = true;
+        }
+        if (sat && sat.readyState === "live" && !isSenderActiveOnPc(peer.pc, peer.screenAudioSender, sat)) {
+            peer.screenAudioSender = peer.pc.addTrack(sat, state.screenStream);
+            changed = true;
+        }
+    }
+
+    if (!changed && peer.pc.signalingState === "stable") {
+        const checkUnnegotiated = (sender) => {
+            if (!sender || !sender.track) return false;
+            try {
+                const tr = peer.pc.getTransceivers().find((t) => t.sender === sender);
+                if (!tr || tr.stopped) return false;
+                const wantsSend = tr.direction === "sendonly" || tr.direction === "sendrecv";
+                const curSends = tr.currentDirection === "sendonly" || tr.currentDirection === "sendrecv";
+                return wantsSend && !curSends;
+            } catch {
+                return false;
+            }
+        };
+        if (
+            checkUnnegotiated(peer.micSender) ||
+            checkUnnegotiated(peer.camSender) ||
+            checkUnnegotiated(peer.screenVideoSender) ||
+            checkUnnegotiated(peer.screenAudioSender)
+        ) {
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        scheduleNegotiation(peerId, false);
+    }
+    return changed;
+}
+
+export function scheduleNegotiation(peerId, iceRestart = false) {
+    const peer = state.peers.get(peerId);
+    if (!peer || peer.closed) return;
+
+    if (iceRestart) peer.pendingIceRestart = true;
+    peer.needsNegotiation = true;
+
+    enqueuePeerOp(peer, async () => {
+        if (peer.closed || !peer.needsNegotiation) return;
+        if (peer.pc.signalingState !== "stable") return;
+
+        const doRestart = Boolean(peer.pendingIceRestart);
+        peer.needsNegotiation = false;
+        peer.pendingIceRestart = false;
+
+        try {
+            peer.makingOffer = true;
+            const offer = await peer.pc.createOffer(doRestart ? { iceRestart: true } : undefined);
+            if (peer.pc.signalingState !== "stable") {
+                peer.needsNegotiation = true;
+                return;
+            }
+            offer.sdp = optimizeOpusSDP(offer.sdp);
+            await peer.pc.setLocalDescription(offer);
+            const desc = peer.pc.localDescription;
+            socket.emit("webrtc-offer", {
+                to: peerId,
+                offer: {
+                    type: desc.type,
+                    sdp: desc.sdp,
+                    meta: buildLocalTrackMeta(peer)
+                }
+            });
+        } catch {
+            peer.needsNegotiation = true;
+        } finally {
+            peer.makingOffer = false;
+        }
+    });
+}
+
+export function sendOfferToPeer(peerId, iceRestart = false) {
+    getOrCreatePeer(peerId, { autoAttach: true });
+    scheduleNegotiation(peerId, iceRestart);
+}
+
+async function flushCandidates(peer) {
+    const q = peer.pendingCandidates;
+    peer.pendingCandidates = [];
+    for (const c of q) {
+        if (peer.closed) break;
+        await peer.pc.addIceCandidate(c).catch(() => { });
+    }
+}
+
+export function getOrCreatePeer(peerId, { autoAttach = true } = {}) {
+    if (state.peers.has(peerId)) return state.peers.get(peerId);
+
+    const pc = new RTCPeerConnection({
+        iceServers: state.voiceIceServers,
+        iceCandidatePoolSize: 2
+    });
+
+    const peer = {
+        id: peerId,
+        pc,
+        closed: false,
+        createdAt: Date.now(),
+        polite: socket.id < peerId,
+        makingOffer: false,
+        ignoreOffer: false,
+        needsNegotiation: false,
+        pendingIceRestart: false,
+        autoIceRestarted: false,
+        joinFallbackTimer: null,
+        queue: Promise.resolve(),
+        pendingCandidates: [],
+        micSender: null,
+        camSender: null,
+        screenVideoSender: null,
+        screenAudioSender: null,
+        remoteMeta: { mids: {}, tracks: {}, streams: {} },
+        audioNodes: [],
+        lastStats: null
+    };
+
+    state.peers.set(peerId, peer);
+
+    pc.onnegotiationneeded = () => {
+        if (peer.closed) return;
+        scheduleNegotiation(peerId, false);
+    };
+
+    pc.onicecandidate = (e) => {
+        if (e.candidate && !peer.closed) {
+            socket.emit("webrtc-ice", { to: peerId, candidate: e.candidate });
+        }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+        if (peer.closed) return;
+        hooks.updateHealthPill(state.lastPingMs);
+
+        const st = pc.iceConnectionState;
+        if (st === "connected" || st === "completed") {
+            peer.autoIceRestarted = false;
+        } else if (st === "failed") {
+            if (!peer.autoIceRestarted) {
+                peer.autoIceRestarted = true;
+                setTimeout(() => {
+                    if (!peer.closed && (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected")) {
+                        scheduleNegotiation(peerId, true);
+                    }
+                }, 1200);
+            } else if (!state.turnAlertShownForChannel && !state.hasTurnConfigured) {
+                state.turnAlertShownForChannel = true;
+                showToast(
+                    "P2P bağlantısı kurulamadı (CGNAT / Aynı ağ NAT engeli). Kesintisiz iletişim için TURN sunucusu gerekli — detaylar için 🩺 paneline bak.",
+                    "err",
+                    6500
+                );
+            }
+        }
+    };
+
+    pc.onconnectionstatechange = () => {
+        if (peer.closed) return;
+        hooks.updateHealthPill(state.lastPingMs);
+    };
+
+    pc.ontrack = (e) => {
+        if (peer.closed) return;
+        if (e.receiver && "playoutDelayHint" in e.receiver) {
+            e.receiver.playoutDelayHint = 0;
+        }
+        const stream = (e.streams && e.streams[0]) || new MediaStream([e.track]);
+        const kind = resolveRemoteTrackKind(peerId, peer, e.track, stream, e.transceiver);
+
+        if (e.track.kind === "audio") {
+            attachRemoteAudio(peerId, peer, e.track, stream, { isMic: kind !== "screen-audio" });
+            return;
+        }
+
+        if (e.track.kind === "video") {
+            const tileKind = kind === "screen" ? "screen" : "cam";
+            const m = state.voiceMembersCache.get(peerId) || state.members.find((x) => x.id === peerId);
+            const name = m?.displayName || m?.username || "Arkadaş";
+            const tileKey = `${tileKind}-${peerId}`;
+            const icon = tileKind === "screen" ? "🖥️" : "📹";
+
+            const videoOnlyStream = new MediaStream([e.track]);
+            showMediaTile(tileKey, `${icon} ${name}`, videoOnlyStream, { kind: tileKind, isLocal: false });
+
+            const cleanupTileIfCurrent = () => {
+                const tileEl = document.getElementById("tile-" + tileKey);
+                const curVid = tileEl?.querySelector("video");
+                const curTrack = curVid?.srcObject?.getVideoTracks?.()[0];
+                if (!curTrack || curTrack.id === e.track.id) {
+                    removeMediaTile(tileKey);
+                }
+            };
+
+            e.track.addEventListener("ended", cleanupTileIfCurrent, { once: true });
+            e.track.addEventListener("mute", () => {
+                setTimeout(() => {
+                    if (peer.closed) return;
+                    const memberNow = state.voiceMembersCache.get(peerId) || state.members.find((x) => x.id === peerId);
+                    const memberStopped = tileKind === "cam" ? memberNow && !memberNow.camOn : memberNow && !memberNow.screenSharing;
+                    const trDir = e.transceiver?.currentDirection;
+                    const stoppedBySdp = trDir === "inactive" || trDir === "sendonly" || e.transceiver?.stopped;
+                    if (e.track.readyState === "ended" || memberStopped || stoppedBySdp) {
+                        cleanupTileIfCurrent();
+                    }
+                }, 700);
+            });
+            e.track.addEventListener("unmute", () => {
+                if (peer.closed) return;
+                const mNow = state.voiceMembersCache.get(peerId) || state.members.find((x) => x.id === peerId);
+                const nNow = mNow?.displayName || mNow?.username || "Arkadaş";
+                showMediaTile(tileKey, `${icon} ${nNow}`, videoOnlyStream, { kind: tileKind, isLocal: false });
+            });
+        }
+    };
+
+    if (autoAttach) {
+        ensureLocalTracksAttached(peerId, peer);
+    }
+
+    return peer;
+}
+
+export function handleIncomingOffer(from, offer) {
+    if (!state.voiceChannelId || !from || !offer) return;
+    const peer = getOrCreatePeer(from, { autoAttach: false });
+    if (peer.joinFallbackTimer) {
+        clearTimeout(peer.joinFallbackTimer);
+        peer.joinFallbackTimer = null;
+    }
+
+    enqueuePeerOp(peer, async () => {
+        if (peer.closed) return;
+
+        if (offer.meta) {
+            applyRemoteTrackMeta(from, peer, offer.meta);
+        }
+
+        const offerCollision = peer.makingOffer || peer.pc.signalingState !== "stable";
+        peer.ignoreOffer = !peer.polite && offerCollision;
+        if (peer.ignoreOffer) return;
+
+        try {
+            const cleanOffer = { type: offer.type, sdp: offer.sdp };
+            if (offerCollision) {
+                await peer.pc.setLocalDescription({ type: "rollback" }).catch(() => { });
+            }
+            await peer.pc.setRemoteDescription(cleanOffer);
+            await flushCandidates(peer);
+
+            attachLocalMicOnly(peer);
+
+            const answer = await peer.pc.createAnswer();
+            answer.sdp = optimizeOpusSDP(answer.sdp);
+            await peer.pc.setLocalDescription(answer);
+
+            const desc = peer.pc.localDescription;
+            socket.emit("webrtc-answer", {
+                to: from,
+                answer: {
+                    type: desc.type,
+                    sdp: desc.sdp,
+                    meta: buildLocalTrackMeta(peer)
+                }
+            });
+
+            peer.needsNegotiation = false;
+            ensureLocalTracksAttached(from, peer);
+        } catch { }
+    });
+}
+
+export function handleIncomingAnswer(from, answer) {
+    const peer = state.peers.get(from);
+    if (!peer || !answer) return;
+
+    enqueuePeerOp(peer, async () => {
+        if (peer.closed) return;
+        if (answer.meta) {
+            applyRemoteTrackMeta(from, peer, answer.meta);
+        }
+        if (peer.pc.signalingState !== "have-local-offer") return;
+
+        try {
+            const cleanAnswer = { type: answer.type, sdp: answer.sdp };
+            await peer.pc.setRemoteDescription(cleanAnswer);
+            await flushCandidates(peer);
+
+            if (peer.needsNegotiation && peer.pc.signalingState === "stable") {
+                scheduleNegotiation(from, false);
+            }
+        } catch { }
+    });
+}
+
+export function handleIncomingIce(from, candidate) {
+    const peer = state.peers.get(from);
+    if (!peer || !candidate || peer.closed) return;
+
+    if (peer.pc.remoteDescription && peer.pc.remoteDescription.type) {
+        peer.pc.addIceCandidate(candidate).catch(() => { });
+    } else {
+        peer.pendingCandidates.push(candidate);
+    }
+}
+
+export function handlePeerJoinedVoice({ peerId, serverId, channelId }) {
+    if (!peerId || peerId === socket.id) return;
+    if (serverId !== state.voiceServerId || channelId !== state.voiceChannelId) return;
+
+    const peer = getOrCreatePeer(peerId, { autoAttach: false });
+    if (peer.joinFallbackTimer) clearTimeout(peer.joinFallbackTimer);
+    peer.joinFallbackTimer = setTimeout(() => {
+        peer.joinFallbackTimer = null;
+        if (!peer.closed && !peer.pc.remoteDescription && peer.pc.signalingState === "stable") {
+            ensureLocalTracksAttached(peerId, peer);
+        }
+    }, 3000);
+}
+
+export function closePeer(peerId) {
+    const peer = state.peers.get(peerId);
+    if (peer) {
+        peer.closed = true;
+        if (peer.joinFallbackTimer) {
+            clearTimeout(peer.joinFallbackTimer);
+            peer.joinFallbackTimer = null;
+        }
+        peer.audioNodes.slice().forEach((n) => cleanupRemoteAudioNode(peer, n));
+        try {
+            peer.pc.onnegotiationneeded = null;
+            peer.pc.onicecandidate = null;
+            peer.pc.ontrack = null;
+            peer.pc.oniceconnectionstatechange = null;
+            peer.pc.onconnectionstatechange = null;
+            peer.pc.close();
+        } catch { }
+        state.peers.delete(peerId);
+    }
+    setSpeakingState(peerId, false);
+    removeMediaTile("cam-" + peerId);
+    removeMediaTile("screen-" + peerId);
+    hooks.updateHealthPill(state.lastPingMs);
+}
+
+// =========================================================================
+// SES KANALI YAŞAM DÖNGÜSÜ
+// =========================================================================
+export function refreshVoiceMembersCacheFrom(memberList) {
+    state.voiceMembersCache.clear();
+    if (!state.voiceChannelId) return;
+    for (const m of memberList || []) {
+        if (m.online && m.id && m.voiceChannel === state.voiceChannelId) {
+            state.voiceMembersCache.set(m.id, m);
+        }
+    }
+    reconcileRemoteMediaWithMembers(memberList);
     pushOverlayState();
 }
 
-export function toggleMute() {
+export function updateVoicePanelUI() {
+    const connected = Boolean(state.voiceChannelId);
+    if ($("voice-conn-wrap")) $("voice-conn-wrap").style.display = connected ? "flex" : "none";
+    if ($("mobile-voice-bar")) $("mobile-voice-bar").classList.toggle("active", connected);
+
+    if (connected) {
+        const srv = state.myServers.find((s) => s.id === state.voiceServerId);
+        const ch = state.voiceServerId === state.activeServerId
+            ? state.channels.find((c) => c.id === state.voiceChannelId)
+            : null;
+        if ($("voice-status")) $("voice-status").textContent = "Ses Bağlı";
+        if ($("voice-channel-sub")) {
+            $("voice-channel-sub").textContent = ch
+                ? `${ch.name}`
+                : (srv ? `${srv.name} (Ses)` : "Aktif Kanal");
+        }
+    }
+    applyMuteState();
+}
+
+export async function joinVoiceChannel(serverId, channelId) {
+    ensureSharedAudioCtx();
+    if (!state.processedMicStream) {
+        try {
+            await buildMicPipeline();
+        } catch (err) {
+            showToast("Mikrofon açılamadı: " + err.message, "err");
+            return;
+        }
+    }
+
+    if (state.voiceChannelId) {
+        stopCamera(true);
+        stopScreenShare(true);
+        for (const pid of Array.from(state.peers.keys())) closePeer(pid);
+    }
+
+    socket.emit("join-voice", { serverId, channelId }, async (res) => {
+        if (!res || res.ok === false) {
+            showToast(res?.error || "Ses kanalına katılınamadı.", "err");
+            return;
+        }
+
+        state.voiceServerId = serverId;
+        state.voiceChannelId = channelId;
+        state.turnAlertShownForChannel = false;
+
+        if (Array.isArray(res.iceServers) && res.iceServers.length) {
+            state.voiceIceServers = res.iceServers;
+        }
+        state.hasTurnConfigured = Boolean(res.hasTurnConfigured);
+
+        if (state.voiceServerId === state.activeServerId) {
+            refreshVoiceMembersCacheFrom(state.members);
+        }
+        if (Array.isArray(res.peerStates)) {
+            for (const ps of res.peerStates) {
+                const prev = state.voiceMembersCache.get(ps.id) || {};
+                state.voiceMembersCache.set(ps.id, { ...prev, ...ps });
+            }
+        }
+
+        if (res.isAfkChannel) {
+            state.selfMuted = true;
+            socket.emit("voice-status-update", { selfMuted: true });
+        }
+
+        playTone(680, 0.08);
+        updateVoicePanelUI();
+        hooks.renderServerRail();
+        hooks.renderChannels();
+
+        const peerIds = Array.isArray(res.peers) ? res.peers : [];
+        if (peerIds.length >= 7) {
+            showToast(`Odada ${peerIds.length + 1} kişi var: Kamera/yayın açarken ping ve CPU'yu Dinamik Panelden takip et.`, "info", 4200);
+        }
+
+        for (const pid of peerIds) {
+            sendOfferToPeer(pid, false);
+        }
+    });
+}
+
+export function leaveVoiceCleanup(notifyServer = true) {
     if (!state.voiceChannelId) return;
-    if (state.serverMuted) {
-        showToast("Sunucu yöneticisi tarafından susturuldun.", "err");
+    stopCamera(true);
+    stopScreenShare(true);
+
+    for (const pid of Array.from(state.peers.keys())) closePeer(pid);
+    state.peers.clear();
+    state.speakingMap.clear();
+    state.voiceMembersCache.clear();
+
+    stopMicPipeline();
+
+    state.voiceServerId = null;
+    state.voiceChannelId = null;
+    state.selfMuted = false;
+    state.deafened = false;
+    state.turnAlertShownForChannel = false;
+
+    if (notifyServer) socket.emit("leave-voice");
+    playTone(340, 0.09);
+    updateVoicePanelUI();
+    hooks.renderServerRail();
+    hooks.renderChannels();
+    hooks.renderMembers();
+    pushOverlayState(true);
+}
+
+export async function handleVoiceAfkMoved({ serverId, channelId, channelName, isAfkChannel, reason, movedBy, peers: targetPeers, peerStates }) {
+    stopCamera(true);
+    stopScreenShare(true);
+    for (const pid of Array.from(state.peers.keys())) closePeer(pid);
+
+    state.voiceServerId = serverId;
+    state.voiceChannelId = channelId;
+    if (isAfkChannel || reason === "auto-afk" || reason === "manual-afk") {
+        state.selfMuted = true;
+    }
+    state.turnAlertShownForChannel = false;
+
+    if (state.voiceServerId === state.activeServerId) {
+        refreshVoiceMembersCacheFrom(state.members);
+    }
+    if (Array.isArray(peerStates)) {
+        for (const ps of peerStates) {
+            const prev = state.voiceMembersCache.get(ps.id) || {};
+            state.voiceMembersCache.set(ps.id, { ...prev, ...ps });
+        }
+    }
+
+    applyMuteState();
+    updateVoicePanelUI();
+    hooks.renderChannels();
+    playTone(reason === "moved" ? 620 : 300, 0.12, "triangle", 0.08);
+
+    const msg =
+        reason === "auto-afk"
+            ? `Uzun süre sessiz kaldığınız için "${channelName}" odasına taşındınız.`
+            : reason === "moved"
+                ? `${movedBy || "Bir yetkili"} sizi "${channelName}" ses kanalına taşıdı.`
+                : `${movedBy || "Bir yetkili"} sizi "${channelName}" odasına taşıdı.`;
+
+    showToast(msg, "info", 4500);
+
+    for (const pid of targetPeers || []) {
+        sendOfferToPeer(pid, false);
+    }
+}
+
+// =========================================================================
+// KAMERA PAYLAŞIMI
+// =========================================================================
+export function updateCamButtonsUI(on) {
+    $("btn-cam")?.classList.toggle("on", on);
+    $("m-btn-cam")?.classList.toggle("on", on);
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if ($("btn-flip-cam")) $("btn-flip-cam").style.display = on && isMobile ? "" : "none";
+    if ($("m-btn-flip")) $("m-btn-flip").style.display = on && isMobile ? "" : "none";
+}
+
+export async function toggleCamera() {
+    if (!state.voiceChannelId) return showToast("Kamera açmak için önce bir ses kanalına katıl.", "info");
+    if (state.camStream || state.camBusy) {
+        stopCamera(false);
         return;
     }
-    state.selfMuted = !state.selfMuted;
-    playTone(state.selfMuted ? 380 : 620, 0.06);
-    applyMuteState();
-    socket.emit("voice-status-update", { selfMuted: state.selfMuted });
-}
 
-export function toggleDeafen() {
-    if (!state.voiceChannelId) return;
-    state.deafened = !state.deafened;
-    playTone(state.deafened ? 310 : 540, 0.07);
-    applyMuteState();
-    socket.emit("voice-status-update", { deafened: state.deafened });
-}
+    const attemptId = ++state.camAttemptId;
+    state.camBusy = true;
 
-export function setSpeakingState(socketId, speaking) {
-    const prev = Boolean(state.speakingMap.get(socketId));
-    if (prev === speaking) return;
-    state.speakingMap.set(socketId, speaking);
-
-    if (!state.gameMode && !document.hidden) {
-        document.querySelectorAll(`[data-voice-uid="${socketId}"]`).forEach((el) => {
-            el.classList.toggle("speaking", speaking);
-        });
-        document.querySelectorAll(`[data-member-uid="${socketId}"]`).forEach((el) => {
-            el.classList.toggle("speaking", speaking);
-        });
-        const tile = document.getElementById("tile-cam-" + (socketId === socket.id ? "local" : socketId));
-        if (tile) tile.classList.toggle("speaking", speaking);
+    let stream = null;
+    try {
+        stream = await navigator.mediaDevices.getUserMedia(getCamConstraints());
+    } catch (err) {
+        state.camBusy = false;
+        return showToast("Kamera açılamadı: " + err.message, "err");
     }
 
-    pushOverlayState();
+    if (attemptId !== state.camAttemptId || !state.voiceChannelId) {
+        stream.getTracks().forEach((t) => t.stop());
+        state.camBusy = false;
+        return;
+    }
+
+    state.camBusy = false;
+    state.camStream = stream;
+
+    const vTrack = state.camStream.getVideoTracks()[0];
+    if ("contentHint" in vTrack) vTrack.contentHint = "motion";
+    vTrack.addEventListener("ended", () => {
+        if (state.camStream === stream) stopCamera(false);
+    }, { once: true });
+
+    showMediaTile("cam-local", `📹 ${state.me.displayName || state.me.username} (Sen)`, state.camStream, {
+        kind: "cam",
+        isLocal: true
+    });
+    updateCamButtonsUI(true);
+    socket.emit("voice-status-update", { camOn: true, camStreamId: state.camStream.id });
+
+    const q = parseInt($("cam-quality")?.value, 10) || 480;
+    for (const [peerId, peer] of state.peers.entries()) {
+        if (peer.closed) continue;
+        peer.camSender = peer.pc.addTrack(vTrack, state.camStream);
+        await applyVideoSenderTuning(peer.camSender, "cam", q);
+        scheduleNegotiation(peerId, false);
+    }
 }
 
-export function startDspAndVisualLoops() {
-    stopDspAndVisualLoops();
-    const micBuf = new Uint8Array(128);
-    const peerBuf = new Uint8Array(64);
+export async function restartCameraTrack() {
+    if (!state.camStream) return;
+    try {
+        const nextStream = await navigator.mediaDevices.getUserMedia(getCamConstraints());
+        const newTrack = nextStream.getVideoTracks()[0];
+        if ("contentHint" in newTrack) newTrack.contentHint = "motion";
 
-    state.dspLoopTimer = setInterval(() => {
-        if (!state.micAnalyserNode || !state.noiseGateNode || !state.sharedAudioCtx) return;
+        const oldTrack = state.camStream.getVideoTracks()[0];
+        state.camStream.removeTrack(oldTrack);
+        oldTrack.stop();
+        state.camStream.addTrack(newTrack);
 
-        state.micAnalyserNode.getByteTimeDomainData(micBuf);
-        let sum = 0;
-        for (let i = 0; i < micBuf.length; i++) {
-            const v = (micBuf[i] - 128) / 128;
-            sum += v * v;
-        }
-        const rms = Math.sqrt(sum / micBuf.length);
-        const pct = Math.min(100, Math.round(rms * 260));
+        const activeRef = state.camStream;
+        newTrack.addEventListener("ended", () => {
+            if (state.camStream === activeRef) stopCamera(false);
+        }, { once: true });
 
-        const now = Date.now();
-        const effMuted = isEffectivelyMuted();
-
-        if (effMuted) {
-            state.gateOpen = false;
-            state.noiseGateNode.gain.setTargetAtTime(0, state.sharedAudioCtx.currentTime, 0.015);
-        } else if (state.gateThreshold <= 0) {
-            state.gateOpen = true;
-            state.noiseGateNode.gain.setTargetAtTime(1, state.sharedAudioCtx.currentTime, 0.01);
-        } else if (pct >= state.gateThreshold) {
-            state.gateOpen = true;
-            state.gateHoldUntil = now + 240;
-            state.noiseGateNode.gain.setTargetAtTime(1, state.sharedAudioCtx.currentTime, 0.008);
-        } else if (now > state.gateHoldUntil) {
-            state.gateOpen = false;
-            state.noiseGateNode.gain.setTargetAtTime(0, state.sharedAudioCtx.currentTime, 0.035);
-        }
-
-        const amSpeaking = !effMuted && (state.gateThreshold > 0 ? state.gateOpen : pct > 8);
-        setSpeakingState(socket.id, amSpeaking);
-
-        if (amSpeaking && now - state.lastVoiceActivitySent > 15000) {
-            state.lastVoiceActivitySent = now;
-            socket.emit("voice-activity");
-        }
-
-        if (!document.hidden && !state.gameMode) {
-            const barW = effMuted ? "0%" : `${pct}%`;
-            if ($("mic-meter")) $("mic-meter").style.width = barW;
-            if ($("modal-mic-meter")) $("modal-mic-meter").style.width = barW;
-        }
-    }, 45);
-
-    state.visualLoopTimer = setInterval(() => {
-        for (const [peerId, peer] of state.peers.entries()) {
-            let speaking = false;
-            for (const node of peer.audioNodes) {
-                if (!node.active || !node.isMic || !node.analyser) continue;
-                node.analyser.getByteTimeDomainData(peerBuf);
-                let sum = 0;
-                for (let i = 0; i < peerBuf.length; i++) {
-                    const v = (peerBuf[i] - 128) / 128;
-                    sum += v * v;
-                }
-                const rms = Math.sqrt(sum / peerBuf.length);
-                if (rms > 0.025) {
-                    speaking = true;
-                    break;
-                }
+        const q = parseInt($("cam-quality")?.value, 10) || 480;
+        for (const peer of state.peers.values()) {
+            if (peer.camSender) {
+                await peer.camSender.replaceTrack(newTrack).catch(() => { });
+                await applyVideoSenderTuning(peer.camSender, "cam", q);
             }
-            setSpeakingState(peerId, speaking);
         }
-        pushOverlayState();
-    }, 110);
+        showMediaTile("cam-local", `📹 ${state.me.displayName || state.me.username} (Sen)`, state.camStream, {
+            kind: "cam",
+            isLocal: true
+        });
+    } catch (err) {
+        showToast("Kamera değiştirilemedi: " + err.message, "err");
+    }
 }
 
-export function stopDspAndVisualLoops() {
-    if (state.dspLoopTimer) {
-        clearInterval(state.dspLoopTimer);
-        state.dspLoopTimer = null;
+export function flipCamera() {
+    state.facingMode = state.facingMode === "user" ? "environment" : "user";
+    if ($("cam-select")) $("cam-select").value = "";
+    restartCameraTrack();
+}
+
+export function stopCamera(silent = false) {
+    state.camAttemptId++;
+    state.camBusy = false;
+
+    const hadStream = Boolean(state.camStream);
+    if (state.camStream) {
+        state.camStream.getTracks().forEach((t) => {
+            try { t.stop(); } catch { }
+        });
+        state.camStream = null;
     }
-    if (state.visualLoopTimer) {
-        clearInterval(state.visualLoopTimer);
-        state.visualLoopTimer = null;
+
+    removeMediaTile("cam-local");
+    updateCamButtonsUI(false);
+
+    for (const [peerId, peer] of state.peers.entries()) {
+        if (peer.camSender) {
+            try { peer.pc.removeTrack(peer.camSender); } catch { }
+            peer.camSender = null;
+            if (!silent) scheduleNegotiation(peerId, false);
+        }
     }
-    if ($("mic-meter")) $("mic-meter").style.width = "0%";
-    if ($("modal-mic-meter")) $("modal-mic-meter").style.width = "0%";
+
+    if (!silent) {
+        socket.emit("voice-status-update", { camOn: false, camStreamId: null });
+        if (hadStream) socket.emit("cam-stopped");
+    }
+}
+
+// =========================================================================
+// EKRAN PAYLAŞIMI
+// =========================================================================
+export async function openScreenShareFlow() {
+    if (!state.voiceChannelId) return showToast("Ekran paylaşmak için önce bir ses kanalına katıl.", "info");
+    if (state.screenStream || state.screenBusy) {
+        stopScreenShare(false);
+        return;
+    }
+
+    if (isElectron) {
+        const sources = await window.electronAPI.getScreenSources();
+        const grid = $("source-grid");
+        if (!grid) return;
+        grid.innerHTML = "";
+        state.selectedScreenSourceId = sources[0]?.id || null;
+
+        sources.forEach((src, idx) => {
+            const card = document.createElement("div");
+            card.className = "source-card" + (idx === 0 ? " selected" : "");
+            card.innerHTML = `<img src="${src.thumbnail}" alt="" /><span>${escapeHTML(src.name)}</span>`;
+            card.onclick = () => {
+                grid.querySelectorAll(".source-card").forEach((c) => c.classList.remove("selected"));
+                card.classList.add("selected");
+                state.selectedScreenSourceId = src.id;
+            };
+            grid.appendChild(card);
+        });
+        openModal("screen-modal");
+    } else {
+        await startScreenCapture();
+    }
+}
+
+export async function startScreenCapture() {
+    if (!state.voiceChannelId) return;
+    if (state.screenStream) stopScreenShare(false);
+
+    const resVal = parseInt($("screen-res")?.value, 10) || 720;
+    const fpsVal = parseInt($("screen-fps")?.value, 10) || 30;
+    const withAudio = Boolean($("screen-audio")?.checked);
+
+    const attemptId = ++state.screenAttemptId;
+    state.screenBusy = true;
+
+    if (isElectron) {
+        await window.electronAPI.selectScreenSource({
+            sourceId: state.selectedScreenSourceId,
+            withAudio
+        });
+        closeModal("screen-modal");
+    }
+
+    let stream = null;
+    try {
+        stream = await navigator.mediaDevices.getDisplayMedia({
+            video: {
+                width: { ideal: resVal >= 1080 ? 1920 : 1280 },
+                height: { ideal: resVal },
+                frameRate: { ideal: fpsVal, max: fpsVal }
+            },
+            audio: withAudio
+        });
+    } catch {
+        state.screenBusy = false;
+        showToast("Ekran paylaşımı başlatılamadı.", "err");
+        return;
+    }
+
+    if (attemptId !== state.screenAttemptId || !state.voiceChannelId) {
+        stream.getTracks().forEach((t) => t.stop());
+        state.screenBusy = false;
+        return;
+    }
+
+    state.screenBusy = false;
+    state.screenStream = stream;
+
+    const vTrack = state.screenStream.getVideoTracks()[0];
+    const aTrack = state.screenStream.getAudioTracks()[0] || null;
+    if (vTrack && "contentHint" in vTrack) vTrack.contentHint = "detail";
+
+    if (vTrack) {
+        vTrack.addEventListener("ended", () => {
+            if (state.screenStream === stream) stopScreenShare(false);
+        }, { once: true });
+    }
+
+    $("btn-screen")?.classList.add("on");
+    showMediaTile(
+        "screen-local",
+        `🖥️ ${state.me.displayName || state.me.username} (Ekranın)`,
+        new MediaStream([vTrack]),
+        { kind: "screen", isLocal: true }
+    );
+    socket.emit("voice-status-update", { screenSharing: true, screenStreamId: state.screenStream.id });
+
+    for (const [peerId, peer] of state.peers.entries()) {
+        if (peer.closed) continue;
+        if (vTrack) {
+            peer.screenVideoSender = peer.pc.addTrack(vTrack, state.screenStream);
+            await applyVideoSenderTuning(peer.screenVideoSender, "screen", resVal);
+        }
+        if (aTrack) {
+            peer.screenAudioSender = peer.pc.addTrack(aTrack, state.screenStream);
+        }
+        scheduleNegotiation(peerId, false);
+    }
+}
+
+export function stopScreenShare(silent = false) {
+    state.screenAttemptId++;
+    state.screenBusy = false;
+
+    const hadStream = Boolean(state.screenStream);
+    if (state.screenStream) {
+        state.screenStream.getTracks().forEach((t) => {
+            try { t.stop(); } catch { }
+        });
+        state.screenStream = null;
+    }
+
+    $("btn-screen")?.classList.remove("on");
+    removeMediaTile("screen-local");
+
+    for (const [peerId, peer] of state.peers.entries()) {
+        let removed = false;
+        if (peer.screenVideoSender) {
+            try { peer.pc.removeTrack(peer.screenVideoSender); } catch { }
+            peer.screenVideoSender = null;
+            removed = true;
+        }
+        if (peer.screenAudioSender) {
+            try { peer.pc.removeTrack(peer.screenAudioSender); } catch { }
+            peer.screenAudioSender = null;
+            removed = true;
+        }
+        if (removed && !silent) scheduleNegotiation(peerId, false);
+    }
+
+    if (!silent) {
+        socket.emit("voice-status-update", { screenSharing: false, screenStreamId: null });
+        if (hadStream) socket.emit("screen-share-stopped");
+    }
 }
