@@ -225,7 +225,7 @@ async function bootSequence() {
         socket.emit("login-token", savedToken, (res) => {
             if (res?.ok) {
                 handleLoginSuccess(res);
-            } else {
+            } else if (res && res.ok === false) {
                 localStorage.removeItem("bd_token");
             }
         });

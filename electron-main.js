@@ -20,11 +20,11 @@ const SERVER_URL = process.env.SERVER_URL || "https://bizim-discord.onrender.com
 const PERF_CFG_PATH = path.join(app.getPath("userData"), "perf-config.json");
 
 const DEFAULT_PERF_CONFIG = {
-    disableGpu: true,
+    disableGpu: false,
     overlay: {
         enabled: false,
-        position: "top-left", // top-left | top-right | bottom-left | bottom-right
-        size: "md"            // sm | md | lg
+        position: "top-left",
+        size: "md"
     }
 };
 
@@ -62,6 +62,10 @@ const bootedWithoutGpu = perfConfig.disableGpu && !perfConfig.overlay.enabled;
 if (bootedWithoutGpu) {
     app.disableHardwareAcceleration();
     app.commandLine.appendSwitch("disable-gpu-compositing");
+    app.commandLine.appendSwitch(
+        "disable-features",
+        "AllowWgcWindowCapturer,AllowWgcScreenCapturer,WebRtcAllowWgcDesktopCapturer"
+    );
 }
 
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");

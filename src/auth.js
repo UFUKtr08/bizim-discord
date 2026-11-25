@@ -317,7 +317,8 @@ function registerAuthHandlers(io, socket) {
                 username: clean,
                 expiresAt: Date.now() + SESSION_TTL_MS
             };
-            saveAndSyncDB();
+            db.meta.seededOnly = false;
+            saveAndSyncDB({ immediateDisk: true });
         }
 
         cb?.(completeUserSession(io, socket, clean, record, token));
