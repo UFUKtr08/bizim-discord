@@ -27,22 +27,20 @@
             </div>
             <h2 id="auth-title">BizimDiscord</h2>
             <p id="auth-hint" class="muted-note center">
-                İlk kayıt olan hesap otomatik Genel Yönetici olur.
+                Hesabınla giriş yap veya davet kodunla kayıt ol.
             </p>
 
             <div class="tab-bar" style="justify-content:center;">
-                <button type="button" class="tab-btn active" id="auth-tab-login">Giriş / Kayıt</button>
+                <button type="button" class="tab-btn active" id="auth-tab-login">Giriş Yap</button>
+                <button type="button" class="tab-btn" id="auth-tab-register">Kayıt Ol</button>
                 <button type="button" class="tab-btn" id="auth-tab-recover">Şifre Kurtarma</button>
             </div>
 
-            <!-- GİRİŞ & KAYIT FORMU -->
+            <!-- GİRİŞ FORMU -->
             <div id="auth-pane-login" class="tab-pane active">
                 <div class="field-group">
-                    <input id="auth-user" placeholder="Kullanıcı adı (harf/rakam)" autocomplete="username" />
-                    <input id="auth-pass" type="password" placeholder="Şifre (en az 4 karakter)"
-                        autocomplete="current-password" />
-                    <input id="auth-invite" placeholder="Sunucu Davet Kodu (isteğe bağlı / kayıt için)"
-                        style="display:none;" />
+                    <input id="auth-user" placeholder="Kullanıcı adı" autocomplete="username" />
+                    <input id="auth-pass" type="password" placeholder="Şifre" autocomplete="current-password" />
                 </div>
                 <label class="check-row">
                     <input id="auth-remember" type="checkbox" checked />
@@ -50,7 +48,19 @@
                 </label>
                 <div class="btn-row">
                     <button type="button" id="btn-login" class="btn primary">Giriş Yap</button>
-                    <button type="button" id="btn-register" class="btn secondary">Kayıt Ol</button>
+                </div>
+            </div>
+
+            <!-- KAYIT FORMU (DAVET KODU ZORUNLU) -->
+            <div id="auth-pane-register" class="tab-pane">
+                <div class="field-group">
+                    <input id="reg-user" placeholder="Kullanıcı adı (harf/rakam)" autocomplete="username" />
+                    <input id="reg-pass" type="password" placeholder="Şifre (en az 4 karakter)"
+                        autocomplete="new-password" />
+                    <input id="reg-invite" placeholder="Sunucu Davet Kodu (zorunlu)" autocomplete="off" />
+                </div>
+                <div class="btn-row">
+                    <button type="button" id="btn-register" class="btn primary">Kayıt Ol</button>
                 </div>
             </div>
 
@@ -664,7 +674,7 @@
                 </div>
             </div>
 
-            <div id="tab-overlay" class="tab-pane">
+            <div id="tab-overlay" class <div id="tab-overlay" class="tab-pane">
                 <div id="electron-overlay-card" class="card-block" style="display:none;">
                     <div class="row-between">
                         <label class="check-row">

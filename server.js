@@ -196,8 +196,7 @@ io.on("connection", (socket) => {
     socket.emit("server-info", {
         version: APP_VERSION,
         serverName: defSrv?.name || "BizimDiscord",
-        hasInviteCode: Boolean(db.globalSettings.requireInviteToRegister),
-        isFirstSetup: Object.keys(db.users).length === 0
+        hasInviteCode: Boolean(db.globalSettings.requireInviteToRegister)
     });
 
     socket.on("ping-check", (cb) => {

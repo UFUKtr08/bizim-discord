@@ -147,7 +147,7 @@ function ensureDynamicUIControls() {
         $("auth-remember").checked = true;
     }
 
-    // 3) Giriş ekranına varsayılanı Yeşil (Çevrimiçi) olan giriş durum seçicisi ekle
+    // 3) Giriş sekmesine varsayılanı Yeşil (Çevrimiçi) olan giriş durum seçicisi ekle
     if (!$("auth-presence") && $("btn-login")) {
         const wrap = document.createElement("div");
         wrap.className = "auth-presence-row";
@@ -159,7 +159,10 @@ function ensureDynamicUIControls() {
                 <option value="offline">⚫ Çevrimdışı (Görünmez)</option>
             </select>
         `;
-        $("btn-login").parentElement.insertBefore(wrap, $("btn-login"));
+        const btnRow = $("btn-login").parentElement;
+        if (btnRow?.parentElement) {
+            btnRow.parentElement.insertBefore(wrap, btnRow);
+        }
     }
 
     // 4) Rol düzenleyicisinde moveMembers ve manageNicknames kutucukları yoksa otomatik ekle
@@ -315,22 +318,23 @@ function bindAllUIEvents() {
     $("btn-mobile-right").onclick = () => toggleDrawer("right");
     $("btn-mobile-right-close").onclick = closeDrawers;
 
-    // Auth sekmeleri
-    $("auth-tab-login").onclick = () => {
-        $("auth-tab-login").classList.add("active");
-        $("auth-tab-recover").classList.remove("active");
-        $("auth-pane-login").classList.add("active");
-        $("auth-pane-recover").classList.remove("active");
-        $("auth-err").textContent = "";
+    // Auth 3 sekmeli geçiş (Giriş / Kayıt / Şifre Kurtarma)
+    const switchAuthTab = (target) => {
+        const tabs = [
+            { key: "login", btn: $("auth-tab-login"), pane: $("auth-pane-login") },
+            { key: "register", btn: $("auth-tab-register"), pane: $("auth-pane-register") },
+            { key: "recover", btn: $("auth-tab-recover"), pane: $("auth-pane-recover") }
+        ];
+        tabs.forEach(({ key, btn, pane }) => {
+            btn?.classList.toggle("active", key === target);
+            pane?.classList.toggle("active", key === target);
+        });
+        if ($("auth-err")) $("auth-err").textContent = "";
     };
 
-    $("auth-tab-recover").onclick = () => {
-        $("auth-tab-recover").classList.add("active");
-        $("auth-tab-login").classList.remove("active");
-        $("auth-pane-recover").classList.add("active");
-        $("auth-pane-login").classList.remove("active");
-        $("auth-err").textContent = "";
-    };
+    if ($("auth-tab-login")) $("auth-tab-login").onclick = () => switchAuthTab("login");
+    if ($("auth-tab-register")) $("auth-tab-register").onclick = () => switchAuthTab("register");
+    if ($("auth-tab-recover")) $("auth-tab-recover").onclick = () => switchAuthTab("recover");
 
     $("btn-copy-rec-code").onclick = () => {
         const val = $("recovery-code-val").textContent.trim();
@@ -357,7 +361,7 @@ function bindAllUIEvents() {
             $("rec-new-pass").value = "";
             $("auth-user").value = username;
             $("auth-pass").value = "";
-            $("auth-tab-login").click();
+            switchAuthTab("login");
             showGeneratedRecoveryCode(res.newRecoveryCode);
             showToast("Şifren yenilendi! Yeni kurtarma kodunu kaydet.", "ok", 5000);
         });
@@ -385,7 +389,7 @@ function bindAllUIEvents() {
         };
     });
 
-    // Giriş & Kayıt
+    // Giriş
     const doLogin = () => {
         const username = $("auth-user").value.trim();
         const password = $("auth-pass").value;
@@ -403,23 +407,38 @@ function bindAllUIEvents() {
         if (e.key === "Enter") doLogin();
     });
 
-    $("btn-register").onclick = () => {
-        const username = $("auth-user").value.trim();
-        const password = $("auth-pass").value;
-        const inviteCode = $("auth-invite").value.trim();
+    // Kayıt (Davet Kodu Zorunlu)
+    const doRegister = () => {
+        const username = ($("reg-user")?.value || "").trim();
+        const password = $("reg-pass")?.value || "";
+        const inviteCode = ($("reg-invite")?.value || "").trim();
         $("auth-err").textContent = "";
+
+        if (!inviteCode) {
+            $("auth-err").textContent = "Kayıt olmak için geçerli bir sunucu davet kodu gerekli.";
+            $("reg-invite")?.focus();
+            return;
+        }
+
         socket.emit("register", { username, password, inviteCode }, (res) => {
             if (!res?.ok) {
-                if (res?.error?.toLowerCase().includes("davet")) {
-                    $("auth-invite").style.display = "block";
-                }
                 $("auth-err").textContent = res?.error || "Kayıt başarısız.";
-            } else {
-                if (res.recoveryCode) showGeneratedRecoveryCode(res.recoveryCode);
-                showToast("Hesap oluşturuldu! Kurtarma kodunu kaydettikten sonra giriş yapabilirsin.", "ok", 5000);
+                return;
             }
+            if ($("reg-pass")) $("reg-pass").value = "";
+            if ($("reg-invite")) $("reg-invite").value = "";
+            if ($("auth-user")) $("auth-user").value = username;
+            if ($("auth-pass")) $("auth-pass").value = "";
+            switchAuthTab("login");
+            if (res.recoveryCode) showGeneratedRecoveryCode(res.recoveryCode);
+            showToast("Hesap oluşturuldu! Kurtarma kodunu kaydettikten sonra giriş yapabilirsin.", "ok", 5000);
         });
     };
+
+    $("btn-register").onclick = doRegister;
+    $("reg-invite")?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") doRegister();
+    });
 
     $("btn-logout").onclick = () => {
         if (!confirm("Hesaptan çıkış yapmak istiyor musun?")) return;
@@ -1127,12 +1146,6 @@ socket.on("connect", () => {
 socket.on("server-info", (info) => {
     if (!info) return;
     if ($("auth-title")) $("auth-title").textContent = info.serverName || "BizimDiscord";
-    if ($("auth-invite")) $("auth-invite").style.display = info.hasInviteCode && !info.isFirstSetup ? "block" : "none";
-    if ($("auth-hint")) {
-        $("auth-hint").textContent = info.isFirstSetup
-            ? "İlk kayıt olan hesap otomatik Genel Yönetici olur."
-            : "Hesabınla giriş yap veya yeni hesap oluştur.";
-    }
 });
 
 socket.on("db-sync", (fullDB) => {

@@ -197,8 +197,7 @@ function registerAuthHandlers(io, socket) {
         io.emit("server-info", {
             version: APP_VERSION,
             serverName: newDefSrv?.name || "BizimDiscord",
-            hasInviteCode: Boolean(nextDB.globalSettings.requireInviteToRegister),
-            isFirstSetup: false
+            hasInviteCode: true
         });
 
         for (const [sid, au] of activeUsers.entries()) {
@@ -242,26 +241,33 @@ function registerAuthHandlers(io, socket) {
             return cb?.({ ok: false, error: "Bu kullanıcı adı zaten alınmış." });
         }
 
-        const isFirstUser = Object.keys(db.users).length === 0;
         const cleanInvite = (inviteCode || "").trim().toUpperCase();
-
-        let targetServer = null;
-        if (cleanInvite) {
-            targetServer = Object.values(db.servers).find(
-                (s) => s.inviteCode && s.inviteCode.toUpperCase() === cleanInvite
-            );
+        if (!cleanInvite) {
+            return cb?.({ ok: false, error: "Kayıt olmak için geçerli bir sunucu davet kodu gerekli." });
         }
 
-        if (!isFirstUser && db.globalSettings.requireInviteToRegister) {
-            const matchesGlobal = db.globalSettings.registrationInviteCode && cleanInvite === db.globalSettings.registrationInviteCode;
-            if (!targetServer && !matchesGlobal) {
-                return cb?.({ ok: false, error: "Geçerli bir sunucu davet kodu gerekli." });
-            }
+        // Yalnızca ana sunucu veya Genel Yönetici'nin sahip olduğu sunucuların davet kodları yeni kayda izin verir
+        const defaultSrvId = db.globalSettings.defaultServerId;
+        const matchedOfficialServer = Object.values(db.servers).find((s) => {
+            if (!s.inviteCode || s.inviteCode.toUpperCase() !== cleanInvite) return false;
+            const isDefaultSrv = s.id === defaultSrvId;
+            const isOwnedByGlobalAdmin = Boolean(s.ownerId && db.users[s.ownerId]?.isGlobalAdmin);
+            return isDefaultSrv || isOwnedByGlobalAdmin;
+        });
+
+        const matchesGlobalCode = Boolean(
+            db.globalSettings.registrationInviteCode &&
+            cleanInvite === db.globalSettings.registrationInviteCode.toUpperCase()
+        );
+
+        if (!matchedOfficialServer && !matchesGlobalCode) {
+            return cb?.({ ok: false, error: "Geçersiz davet kodu. Kayıt için ana sunucu davet kodu gerekli." });
         }
 
-        if (!targetServer) {
-            targetServer = db.servers[db.globalSettings.defaultServerId] || Object.values(db.servers)[0];
-        }
+        const targetServer =
+            matchedOfficialServer ||
+            db.servers[defaultSrvId] ||
+            Object.values(db.servers)[0];
 
         const color = USER_PALETTE[Math.floor(Math.random() * USER_PALETTE.length)];
         const { salt, hash } = hashSecret(password);
@@ -274,8 +280,8 @@ function registerAuthHandlers(io, socket) {
             hash,
             recoverySalt: recHashObj.salt,
             recoveryHash: recHashObj.hash,
-            role: isFirstUser ? "admin" : "user",
-            isGlobalAdmin: isFirstUser,
+            role: "user",
+            isGlobalAdmin: false,
             displayName: clean,
             color,
             status: "Çevrimiçi",
@@ -283,12 +289,7 @@ function registerAuthHandlers(io, socket) {
         };
 
         if (targetServer) {
-            if (isFirstUser && !targetServer.ownerId) {
-                targetServer.ownerId = clean;
-            }
-            const assignRoleId = isFirstUser
-                ? (targetServer.roles[0]?.id || "role-admin")
-                : (targetServer.roles[targetServer.roles.length - 1]?.id || "role-member");
+            const assignRoleId = targetServer.roles[targetServer.roles.length - 1]?.id || "role-member";
             targetServer.members[clean] = {
                 roleIds: [assignRoleId],
                 nickname: "",

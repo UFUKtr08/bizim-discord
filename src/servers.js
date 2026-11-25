@@ -25,7 +25,7 @@ const {
     broadcastAllUserServers
 } = require("./db");
 
-const { moveSocketToVoiceChannel } = require("./voice");
+const MAX_SERVERS_PER_MEMBER = 2;
 
 function registerServerHandlers(io, socket) {
     // --- ÇOKLU SUNUCU YÖNETİMİ ---
@@ -33,6 +33,17 @@ function registerServerHandlers(io, socket) {
         const db = getDB();
         const user = activeUsers.get(socket.id);
         if (!user) return cb?.({ ok: false, error: "Oturum bulunamadı." });
+
+        if (!checkRateLimit("srv-create:" + user.username, 3, 600000)) {
+            return cb?.({ ok: false, error: "Çok sık sunucu oluşturdun. Biraz bekle." });
+        }
+
+        if (!user.isGlobalAdmin) {
+            const ownedCount = Object.values(db.servers).filter((s) => s.ownerId === user.username).length;
+            if (ownedCount >= MAX_SERVERS_PER_MEMBER) {
+                return cb?.({ ok: false, error: `En fazla ${MAX_SERVERS_PER_MEMBER} sunucu oluşturabilirsin.` });
+            }
+        }
 
         const cleanName = (name || "").trim().slice(0, 32);
         if (cleanName.length < 2) {
@@ -53,6 +64,7 @@ function registerServerHandlers(io, socket) {
         if (icon) newSrv.icon = sanitizeAvatar(icon);
         newSrv.members[user.username] = {
             roleIds: ["role-admin"],
+            nickname: "",
             joinedAt: Date.now()
         };
 
@@ -97,6 +109,7 @@ function registerServerHandlers(io, socket) {
             const defaultRole = targetSrv.roles[targetSrv.roles.length - 1]?.id || "role-member";
             targetSrv.members[user.username] = {
                 roleIds: [defaultRole],
+                nickname: "",
                 joinedAt: Date.now()
             };
             db.meta.seededOnly = false;
@@ -569,6 +582,38 @@ function registerServerHandlers(io, socket) {
         cb?.({ ok: true });
     });
 
+    // --- SUNUCU BAZLI TAKMA AD (MANAGE NICKNAMES) ---
+    socket.on("member-set-nickname", ({ serverId, targetUsername, nickname }, cb) => {
+        const db = getDB();
+        const user = activeUsers.get(socket.id);
+        const srv = db.servers[serverId];
+        const target = String(targetUsername || "").trim().toLowerCase();
+
+        if (!user || !srv || !srv.members[user.username]) {
+            return cb?.({ ok: false, error: "Yetkisiz işlem." });
+        }
+        if (!srv.members[target]) {
+            return cb?.({ ok: false, error: "Üye sunucuda bulunamadı." });
+        }
+
+        const isSelfOwner = srv.ownerId === user.username && target === user.username;
+        const canNickPerm =
+            hasPerm(srv, user.username, "manageNicknames") ||
+            hasPerm(srv, user.username, "manageServer");
+
+        if (!isSelfOwner && (!canNickPerm || !canActOnMember(srv, user.username, target))) {
+            return cb?.({ ok: false, error: "Bu üyenin sunucu takma adını değiştirme yetkiniz yok." });
+        }
+
+        const cleanNick = typeof nickname === "string" ? nickname.trim().slice(0, 28) : "";
+        srv.members[target].nickname = cleanNick;
+
+        db.meta.seededOnly = false;
+        saveAndSyncDB();
+        broadcastServerState(srv.id);
+        cb?.({ ok: true, nickname: cleanNick });
+    });
+
     // --- MODERASYON ---
     socket.on("member-kick", ({ serverId, targetUsername }, cb) => {
         const db = getDB();
@@ -638,35 +683,6 @@ function registerServerHandlers(io, socket) {
         cb?.({ ok: true });
     });
 
-    socket.on("member-move-afk", ({ serverId, targetUsername }, cb) => {
-        const db = getDB();
-        const user = activeUsers.get(socket.id);
-        const srv = db.servers[serverId];
-        if (!user || !srv || !hasPerm(srv, user.username, "muteMembers")) {
-            return cb?.({ ok: false, error: "Üyeyi AFK kanalına taşıma yetkiniz yok." });
-        }
-        if (!srv.afkChannelId) {
-            return cb?.({ ok: false, error: "Bu sunucuda AFK ses kanalı tanımlı değil." });
-        }
-        if (!canActOnMember(srv, user.username, targetUsername)) {
-            return cb?.({ ok: false, error: "Kendi seviyenize eşit veya üstündeki bir üyeyi taşıyamazsınız." });
-        }
-
-        let targetSid = null;
-        for (const [sid, au] of activeUsers.entries()) {
-            if (au.username === targetUsername && au.voiceServerId === serverId && au.voiceChannel) {
-                targetSid = sid;
-                break;
-            }
-        }
-        if (!targetSid) {
-            return cb?.({ ok: false, error: "Üye bu sunucuda bir ses kanalında değil." });
-        }
-
-        moveSocketToVoiceChannel(io, targetSid, serverId, srv.afkChannelId, "admin-move");
-        cb?.({ ok: true });
-    });
-
     // --- METİN SOHBETİ ---
     socket.on("chat-message", ({ serverId, channelId, text, image, file, replyTo }) => {
         const db = getDB();
@@ -704,12 +720,13 @@ function registerServerHandlers(io, socket) {
             : null;
 
         const rec = db.users[user.username];
+        const srvNick = srv.members[user.username]?.nickname || "";
         const msg = {
             id: "msg-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6),
             serverId: srv.id,
             channelId: ch.id,
             sender: user.username,
-            displayName: rec?.displayName || user.username,
+            displayName: srvNick || rec?.displayName || user.username,
             color: rec?.color || "#5865f2",
             avatar: rec?.avatar || "",
             topRole: getMemberTopRole(srv, user.username),
@@ -792,11 +809,12 @@ function registerServerHandlers(io, socket) {
         const user = activeUsers.get(socket.id);
         const srv = db.servers[serverId];
         if (!user || !srv || !srv.members[user.username]) return;
+        const srvNick = srv.members[user.username]?.nickname || "";
         socket.to("srv:" + serverId).emit("user-typing", {
             serverId,
             channelId,
             username: user.username,
-            displayName: user.displayName || user.username,
+            displayName: srvNick || user.displayName || user.username,
             isTyping: Boolean(isTyping)
         });
     });
