@@ -1,10 +1,16 @@
-const CACHE_NAME = "bizim-discord-v5-shell";
+const CACHE_NAME = "bizim-discord-v5-2-shell";
 const SHELL_ASSETS = [
     "/",
     "/style.css",
-    "/app.js",
     "/manifest.json",
-    "/icon.svg"
+    "/icon.svg",
+    "/js/state.js",
+    "/js/audio.js",
+    "/js/webrtc.js",
+    "/js/health.js",
+    "/js/tools.js",
+    "/js/ui.js",
+    "/js/app.js"
 ];
 
 self.addEventListener("install", (event) => {
@@ -44,7 +50,7 @@ self.addEventListener("fetch", (event) => {
     ) {
         return;
     }
-    // Network-First: Render güncellemeleri anında yansır, bağlantı yoksa kabuk önbellekten açılır
+
     event.respondWith(
         fetch(req)
             .then((res) => {

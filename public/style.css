@@ -1,5 +1,5 @@
 /* =========================================================================
-   BizimDiscord v5.0 — Sade, Göz Yormayan Minimal Koyu Tasarım
+   BizimDiscord v5.2 — Sade, Göz Yormayan Minimal Koyu Tasarım
    ========================================================================= */
 
 :root {
@@ -95,7 +95,16 @@ body.game-mode * {
     animation: none !important;
 }
 
-/* Kaydırma Çubukları */
+.audio-sink-pool {
+    position: fixed;
+    left: -9999px;
+    top: -9999px;
+    width: 1px;
+    height: 1px;
+    opacity: 0.001;
+    pointer-events: none;
+}
+
 ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -132,7 +141,6 @@ body.game-mode * {
     z-index: 20;
 }
 
-/* EN SOL: İNCE SUNUCU GEÇİŞ ŞERİDİ */
 #server-rail {
     width: 62px;
     background: var(--bg-rail);
@@ -257,7 +265,6 @@ body.game-mode * {
     border: 2px solid var(--bg-rail);
 }
 
-/* SOL KANAL PANELİ */
 #sidebar {
     width: 242px;
     background: var(--bg-sidebar);
@@ -466,7 +473,6 @@ body.game-mode * {
     color: var(--text-bright);
 }
 
-/* Ses Kanalı İçindeki Katılımcılar */
 .voice-occupants {
     list-style: none;
     padding-left: 24px;
@@ -504,7 +510,6 @@ body.game-mode * {
     gap: 3px;
 }
 
-/* ALT SES & PROFİL PANELİ */
 #voice-panel {
     border-top: 1px solid var(--border-soft);
     background: rgba(0, 0, 0, 0.18);
@@ -800,7 +805,6 @@ body.game-mode * {
     outline: none;
 }
 
-/* ARAÇLAR POPOVER MENÜSÜ */
 .tools-wrap {
     position: relative;
 }
@@ -872,7 +876,6 @@ body.game-mode * {
     margin: 4px 6px;
 }
 
-/* HAZIR KONTROLÜ (READY-CHECK) ŞERİDİ */
 .floating-strip {
     background: var(--bg-elevated);
     border-bottom: 1px solid var(--border-soft);
@@ -1042,7 +1045,6 @@ body.game-mode * {
     pointer-events: none;
 }
 
-/* ORTAK İZLEME & TAKTİK TAHTASI */
 .collab-stage {
     display: flex;
     flex-direction: column;
@@ -1316,7 +1318,6 @@ body.game-mode * {
     padding: 4px 10px;
 }
 
-/* YANIT, YAZIYOR & MESAJ FORMU */
 #reply-banner {
     display: none;
     align-items: center;
@@ -1507,7 +1508,6 @@ body.game-mode * {
     opacity: 0.85;
 }
 
-/* Kullanıcının en yüksek rolü: adının hemen altında zarif, göz yormayan etiket */
 .member-role-badge {
     display: inline-flex;
     align-items: center;
@@ -1784,7 +1784,6 @@ input[type="range"] {
     color: var(--text-bright);
 }
 
-/* OVERLAY & MODAL */
 .overlay {
     position: fixed;
     inset: 0;
@@ -2011,6 +2010,12 @@ input[type="range"] {
     color: #f3cb7b;
 }
 
+.info-banner.danger {
+    background: rgba(229, 72, 77, 0.14);
+    border-color: rgba(229, 72, 77, 0.5);
+    color: #ff989c;
+}
+
 .color-full {
     height: 36px;
     padding: 2px;
@@ -2041,7 +2046,6 @@ input[type="range"] {
     width: 140px;
 }
 
-/* PROFİL DÜZENLEME */
 .profile-edit-row {
     display: flex;
     gap: 14px;
@@ -2063,7 +2067,6 @@ input[type="range"] {
     gap: 8px;
 }
 
-/* ROL YÖNETİCİSİ */
 .roles-manager {
     display: grid;
     grid-template-columns: 200px 1fr;
@@ -2138,7 +2141,6 @@ input[type="range"] {
     opacity: 0.5;
 }
 
-/* SOUNDBOARD */
 .sb-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2170,7 +2172,6 @@ input[type="range"] {
     transform: scale(0.97);
 }
 
-/* ANKETLER */
 .polls-list {
     display: flex;
     flex-direction: column;
@@ -2222,7 +2223,6 @@ input[type="range"] {
     z-index: 1;
 }
 
-/* 1-1 FISILTI (DM) */
 .dm-box {
     height: min(600px, 86vh);
 }
@@ -2326,7 +2326,6 @@ input[type="range"] {
     gap: 8px;
 }
 
-/* SAĞLIK & TABLO */
 .health-grid {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2377,7 +2376,6 @@ input[type="range"] {
     font-weight: 600;
 }
 
-/* EKRAN PAYLAŞIMI SEÇİCİ */
 .source-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
@@ -2438,7 +2436,6 @@ input[type="range"] {
     gap: 8px;
 }
 
-/* LIGHTBOX */
 #lightbox img {
     max-width: 92vw;
     max-height: 90vh;
@@ -2446,7 +2443,6 @@ input[type="range"] {
     box-shadow: var(--shadow-pop);
 }
 
-/* TOAST */
 #toast-container {
     position: fixed;
     right: 16px;
@@ -2480,10 +2476,6 @@ input[type="range"] {
 .toast.info {
     border-left: 3px solid var(--accent);
 }
-
-/* =========================================================================
-   MOBİL & TABLET UYUMLULUK
-   ========================================================================= */
 
 .mobile-only {
     display: none;

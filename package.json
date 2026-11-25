@@ -24,12 +24,12 @@
       "electron-main.js",
       "preload.js",
       "overlay.html",
+      "icon.png",
       "package.json"
     ],
     "win": {
       "target": "nsis",
-      "icon": "build/icon.png",
-      "signAndEditExecutable": false
+      "icon": "build/icon.png"
     },
     "nsis": {
       "oneClick": true,

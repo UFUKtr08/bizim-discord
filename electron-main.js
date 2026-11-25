@@ -64,6 +64,7 @@ if (bootedWithoutGpu) {
     app.commandLine.appendSwitch("disable-gpu-compositing");
 }
 
+app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("disable-background-timer-throttling");
 app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
@@ -336,7 +337,6 @@ ipcMain.handle("select-screen-source", async (_event, opts) => {
 // =========================================================================
 // ANA PENCERE
 // =========================================================================
-
 function createWindow() {
     mainWin = new BrowserWindow({
         width: 1280,
@@ -344,6 +344,7 @@ function createWindow() {
         minWidth: 380,
         minHeight: 560,
         title: "BizimDiscord",
+        icon: path.join(__dirname, "icon.png"),
         autoHideMenuBar: true,
         backgroundColor: "#111214",
         webPreferences: {
@@ -400,7 +401,7 @@ function createWindow() {
     </style></head>
     <body>
       <div class="spinner"></div>
-      <h2>BizimDiscord v5.1 Başlatılıyor...</h2>
+      <h2>BizimDiscord v5.2 Başlatılıyor...</h2>
       <p>Sunucu uyku modundaysa uyanması 20-30 saniye sürebilir. Hazır olduğunda otomatik bağlanacak.</p>
       <div id="st" class="status">Sunucu kontrol ediliyor...</div>
     </body>
